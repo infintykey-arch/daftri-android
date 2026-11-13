@@ -1,0 +1,77 @@
+plugins {
+    id 'com.android.application'
+}
+
+def signingProps = new Properties()
+def signingFile = new File(System.getProperty('user.home'), '.daftri-signing/daftri.properties')
+if (signingFile.exists()) {
+    signingFile.withInputStream { signingProps.load(it) }
+}
+
+android {
+    namespace 'com.cue.daftri'
+    compileSdk 36
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    defaultConfig {
+        applicationId 'com.cue.daftri'
+        minSdk 23
+        targetSdk 35
+        versionCode 14
+        versionName '1.13'
+        manifestPlaceholders = [admobAppId: 'ca-app-pub-8393179162461898~8514526557']
+        buildConfigField 'String', 'ADMOB_BANNER_AD_UNIT_ID', '"ca-app-pub-8393179162461898/1487063710"'
+        buildConfigField 'String', 'ADMOB_NATIVE_AD_UNIT_ID', '"ca-app-pub-8393179162461898/5282179357"'
+        buildConfigField 'String', 'ADMOB_INTERSTITIAL_AD_UNIT_ID', '"ca-app-pub-8393179162461898/2800145387"'
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a'
+            universalApk false
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (signingProps.getProperty('storeFile')) {
+                storeFile file(signingProps.getProperty('storeFile'))
+                storePassword signingProps.getProperty('storePassword')
+                keyAlias signingProps.getProperty('keyAlias')
+                keyPassword signingProps.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.adstest'
+            versionNameSuffix '-adstest'
+            manifestPlaceholders = [admobAppId: 'ca-app-pub-3940256099942544~3347511713']
+            buildConfigField 'String', 'ADMOB_BANNER_AD_UNIT_ID', '"ca-app-pub-3940256099942544/6300978111"'
+            buildConfigField 'String', 'ADMOB_NATIVE_AD_UNIT_ID', '"ca-app-pub-3940256099942544/2247696110"'
+            buildConfigField 'String', 'ADMOB_INTERSTITIAL_AD_UNIT_ID', '"ca-app-pub-3940256099942544/1033173712"'
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-ads:25.4.0'
+    implementation 'com.google.android.ump:user-messaging-platform:4.0.0'
+}

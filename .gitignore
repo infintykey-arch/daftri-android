@@ -1,0 +1,15 @@
+# Android / Gradle generated files
+.gradle/
+**/build/
+local.properties
+
+# Signing material and credentials — never commit these
+.daftri-signing/
+*.jks
+*.keystore
+*.p12
+*.pfx
+**/signing.properties
+**/keystore.properties
+/passwords*
+/secrets*
