@@ -8,6 +8,9 @@ import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.pdf.PdfDocument;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -19,6 +22,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.text.Layout;
+import android.text.StaticLayout;
+import android.text.TextDirectionHeuristics;
+import android.text.TextPaint;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -40,6 +47,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 import java.io.File;
@@ -47,8 +56,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.text.SimpleDateFormat;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import com.google.android.gms.ads.AdError;
@@ -72,6 +84,7 @@ import com.google.android.ump.UserMessagingPlatform;
 public class MainActivity extends Activity {
     private static final int REQUEST_TASK_IMAGES = 410;
     private static final int REQUEST_TITLE_IMAGE = 411;
+    private static final int REQUEST_CREATE_PDF = 412;
     private static final int TASK_IMAGE_LIMIT = 10;
     private static final int INTERSTITIAL_EVERY_DETAILS_CLOSES = 3;
     private static final int MAX_AD_RETRIES = 2;
@@ -93,7 +106,19 @@ public class MainActivity extends Activity {
     };
 
     private final ArrayList<Notebook> notebooks = new ArrayList<>();
+    private final ArrayList<TrashedNotebook> trashedNotebooks = new ArrayList<>();
+    private final LinkedHashSet<String> selectedNotebookIds = new LinkedHashSet<>();
     private LinearLayout cardsContainer;
+    private ScrollView cardsScroll;
+    private LinearLayout selectionToolbar;
+    private TextView selectionModeButton;
+    private TextView selectionStatus;
+    private TextView exportPdfButton;
+    private TextView trashButton;
+    private boolean selectingNotebooks;
+    private boolean pdfExporting;
+    private boolean storageHealthy = true;
+    private File pendingPdfFile;
     private Dialog detailsDialog;
     private TaskEntry pendingImageTask;
     private LinearLayout pendingTaskImageStrip;
@@ -199,9 +224,16 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(0);
-        loadNotebooks();
+        boolean loaded = loadNotebooks();
         renderHome();
         startConsentFlow();
+        if (!loaded) {
+            new AlertDialog.Builder(this)
+                    .setTitle("تعذر قراءة البيانات المحفوظة")
+                    .setMessage("لم تُستبدل بيانات الدفاتر أو الصور. أُوقفت التعديلات لحماية البيانات الحالية.")
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+        }
     }
 
     @Override
@@ -232,6 +264,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CREATE_PDF) {
+            finishPdfSave(resultCode, data);
+            return;
+        }
         if (requestCode == REQUEST_TASK_IMAGES) {
             if (resultCode == RESULT_OK && data != null && pendingImageTask != null) {
                 try {
@@ -330,15 +366,34 @@ public class MainActivity extends Activity {
         energyLine.setAlpha(0.82f);
         root.addView(energyLine, new LinearLayout.LayoutParams(-1, dp(2)));
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
-        scroll.setPadding(0, dp(10), 0, dp(8));
+        selectionToolbar = new LinearLayout(this);
+        selectionToolbar.setOrientation(LinearLayout.HORIZONTAL);
+        selectionToolbar.setGravity(Gravity.CENTER_VERTICAL);
+        selectionToolbar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        selectionToolbar.setPadding(0, dp(5), 0, dp(3));
+        selectionModeButton = actionButton("تحديد بطاقات", false);
+        selectionModeButton.setOnClickListener(v -> toggleNotebookSelectionMode());
+        selectionStatus = text("", 12, MUTED, true);
+        selectionStatus.setGravity(Gravity.CENTER);
+        trashButton = actionButton("سلة المحذوفات", false);
+        trashButton.setOnClickListener(v -> showTrashDialog());
+        exportPdfButton = actionButton("إنشاء PDF", true);
+        exportPdfButton.setOnClickListener(v -> beginPdfExport());
+        selectionToolbar.addView(selectionModeButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        selectionToolbar.addView(trashButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        selectionToolbar.addView(selectionStatus, new LinearLayout.LayoutParams(0, dp(42), 1));
+        selectionToolbar.addView(exportPdfButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        root.addView(selectionToolbar, new LinearLayout.LayoutParams(-1, dp(50)));
+
+        cardsScroll = new ScrollView(this);
+        cardsScroll.setFillViewport(true);
+        cardsScroll.setClipToPadding(false);
+        cardsScroll.setPadding(0, dp(10), 0, dp(8));
         cardsContainer = new LinearLayout(this);
         cardsContainer.setOrientation(LinearLayout.VERTICAL);
         cardsContainer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        scroll.addView(cardsContainer, new ScrollView.LayoutParams(-1, -2));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        cardsScroll.addView(cardsContainer, new ScrollView.LayoutParams(-1, -2));
+        root.addView(cardsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         bannerContainer = new FrameLayout(this);
         bannerContainer.setPadding(0, dp(4), 0, dp(4));
@@ -368,6 +423,8 @@ public class MainActivity extends Activity {
         add.setElevation(dp(8));
         applyElectricGlow(add, 9, true);
         add.setContentDescription("إضافة دفتر جديد");
+        add.setEnabled(storageHealthy);
+        if (!storageHealthy) add.setAlpha(0.45f);
         add.setOnClickListener(v -> showEditor(null));
         FrameLayout.LayoutParams addParams = new FrameLayout.LayoutParams(dp(62), dp(62), Gravity.CENTER);
         footer.addView(add, addParams);
@@ -377,7 +434,42 @@ public class MainActivity extends Activity {
         renderCards();
     }
 
+    private void toggleNotebookSelectionMode() {
+        selectingNotebooks = !selectingNotebooks;
+        if (!selectingNotebooks) selectedNotebookIds.clear();
+        updateSelectionToolbar();
+        renderCards();
+    }
+
+    private void toggleNotebookSelection(Notebook notebook) {
+        if (selectedNotebookIds.contains(notebook.id)) selectedNotebookIds.remove(notebook.id);
+        else selectedNotebookIds.add(notebook.id);
+        updateSelectionToolbar();
+        renderCards();
+    }
+
+    private void updateSelectionToolbar() {
+        if (selectionModeButton == null) return;
+        selectionModeButton.setText(selectingNotebooks ? "إلغاء التحديد" : "تحديد بطاقات");
+        selectionModeButton.setVisibility(View.VISIBLE);
+        selectionModeButton.setEnabled(storageHealthy);
+        trashButton.setEnabled(storageHealthy);
+        trashButton.setVisibility(selectingNotebooks ? View.GONE : View.VISIBLE);
+        selectionStatus.setVisibility(selectingNotebooks ? View.VISIBLE : View.GONE);
+        exportPdfButton.setVisibility(selectingNotebooks && selectedNotebookIds.size() > 1
+                ? View.VISIBLE : View.GONE);
+        selectionStatus.setText(getString(R.string.selected_count,
+                toArabicDigits(String.valueOf(selectedNotebookIds.size()))));
+        trashButton.setText(getString(R.string.trash_count,
+                toArabicDigits(String.valueOf(trashedNotebooks.size()))));
+        exportPdfButton.setEnabled(storageHealthy && !pdfExporting);
+        if (pdfExporting) exportPdfButton.setText(R.string.pdf_exporting);
+        else exportPdfButton.setText(R.string.pdf_export);
+    }
+
     private void renderCards() {
+        int previousScrollY = cardsScroll == null ? 0 : cardsScroll.getScrollY();
+        updateSelectionToolbar();
         cardsContainer.removeAllViews();
         if (notebooks.isEmpty()) {
             destroyActiveNativeAd(false);
@@ -415,6 +507,7 @@ public class MainActivity extends Activity {
                 loadNativeAdIfNeeded();
             }
         }
+        if (cardsScroll != null) cardsScroll.post(() -> cardsScroll.scrollTo(0, previousScrollY));
     }
 
     private void startConsentFlow() {
@@ -904,8 +997,13 @@ public class MainActivity extends Activity {
         applyElectricGlow(card, 4, false);
         card.setClickable(true);
         card.setFocusable(true);
-        card.setOnClickListener(v -> showDetails(notebook));
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(168), 1);
+        card.setOnClickListener(v -> {
+            if (selectingNotebooks) toggleNotebookSelection(notebook);
+            else showDetails(notebook);
+        });
+        boolean selected = selectedNotebookIds.contains(notebook.id);
+        if (selected) cardBackground.setStroke(dp(3), 0xFFB5E2FF);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(176), 1);
         cardParams.setMargins(dp(5), dp(4), dp(5), dp(4));
         row.addView(card, cardParams);
 
@@ -932,7 +1030,22 @@ public class MainActivity extends Activity {
             }
         }
         info.addView(count, new LinearLayout.LayoutParams(-1, -2));
+        TextView createdDate = text("أُنشئ · " + formatLocalDate(notebook.createdAtMs), 10,
+                Color.rgb(222, 236, 255), false);
+        createdDate.setGravity(Gravity.CENTER);
+        createdDate.setMaxLines(2);
+        createdDate.setPadding(0, dp(4), 0, 0);
+        info.addView(createdDate, new LinearLayout.LayoutParams(-1, -2));
         card.addView(info, new FrameLayout.LayoutParams(-1, -1));
+
+        if (selectingNotebooks) {
+            TextView check = text(selected ? "✓" : "○", 22, Color.WHITE, true);
+            check.setGravity(Gravity.CENTER);
+            check.setBackground(roundedSolid(selected ? 0xFF168EFF : 0x66303D50, dp(18)));
+            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(38), dp(38),
+                    Gravity.TOP | Gravity.START);
+            card.addView(check, checkParams);
+        }
 
         TextView more = text("⋮", 25, Color.WHITE, true);
         more.setGravity(Gravity.CENTER);
@@ -945,6 +1058,10 @@ public class MainActivity extends Activity {
     }
 
     private void showNotebookMenu(View anchor, Notebook notebook) {
+        if (!storageHealthy) {
+            Toast.makeText(this, "التخزين غير متاح؛ التعديل متوقف لحماية البيانات", Toast.LENGTH_LONG).show();
+            return;
+        }
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("تعديل الدفتر").setOnMenuItemClickListener(item -> {
             showEditor(notebook);
@@ -992,6 +1109,10 @@ public class MainActivity extends Activity {
         TextView count = text(taskCount(notebook.tasks.size()), 13, MUTED, false);
         count.setPadding(0, dp(3), 0, dp(10));
         panel.addView(count);
+        TextView notebookDate = text("تاريخ إنشاء الدفتر: " + formatLocalDate(notebook.createdAtMs),
+                12, MUTED, false);
+        notebookDate.setPadding(0, 0, 0, dp(8));
+        panel.addView(notebookDate);
         TextView reorderHint = text("اضغط ↔ على مهمتين لتبديل مكانيهما", 12, MUTED, false);
         reorderHint.setPadding(0, 0, 0, dp(6));
         panel.addView(reorderHint);
@@ -1020,11 +1141,16 @@ public class MainActivity extends Activity {
                 task.setMaxLines(Integer.MAX_VALUE);
                 task.setEllipsize(null);
                 task.setHorizontallyScrolling(false);
-                task.setGravity(Gravity.TOP | Gravity.RIGHT);
+                task.setGravity(Gravity.TOP | Gravity.END);
                 row.addView(task, new LinearLayout.LayoutParams(0, -2, 1));
                 TextView swapHandle = swapHandle();
                 row.addView(swapHandle, new LinearLayout.LayoutParams(dp(38), dp(42)));
                 item.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                TextView taskDate = text("تاريخ إنشاء المهمة: " + formatLocalDate(taskEntry.createdAtMs),
+                        11, MUTED, false);
+                taskDate.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                taskDate.setPadding(0, dp(3), 0, dp(4));
+                item.addView(taskDate, new LinearLayout.LayoutParams(-1, -2));
                 item.setTag(taskEntry);
                 HorizontalScrollView imageScroll = new HorizontalScrollView(this);
                 imageScroll.setHorizontalScrollBarEnabled(false);
@@ -1062,6 +1188,7 @@ public class MainActivity extends Activity {
     }
 
     private void showEditor(Notebook existing) {
+        if (!storageHealthy) return;
         final boolean isNew = existing == null;
         Dialog dialog = new Dialog(this);
         LinearLayout panel = dialogPanel();
@@ -1196,7 +1323,7 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         TaskEntry taskEntry = initial == null ? new TaskEntry("", null)
-                : new TaskEntry(initial.text, null);
+                : new TaskEntry(initial.text, null, initial.createdAtMs);
         if (initial != null) taskEntry.imageFileNames.addAll(initial.imageFileNames);
         EditText taskInput = editTaskField("اكتب المهمة");
         taskInput.setText(taskEntry.text);
@@ -1211,6 +1338,11 @@ public class MainActivity extends Activity {
         row.addView(remove, removeParams);
         row.setTag(taskInput);
         item.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        TextView taskDate = text("أُنشئت المهمة: " + formatLocalDate(taskEntry.createdAtMs),
+                11, MUTED, false);
+        taskDate.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        taskDate.setPadding(0, dp(3), 0, dp(4));
+        item.addView(taskDate, new LinearLayout.LayoutParams(-1, -2));
         item.setTag(taskEntry);
 
         LinearLayout imageMenuRow = new LinearLayout(this);
@@ -1406,6 +1538,11 @@ public class MainActivity extends Activity {
 
     private void enableTapToSwap(LinearLayout container, View item, TextView handle,
                                  SwapSelection selection, Runnable onOrderChanged) {
+        if (!storageHealthy) {
+            handle.setEnabled(false);
+            handle.setAlpha(0.45f);
+            return;
+        }
         Drawable originalBackground = item.getBackground();
         CharSequence originalHandleText = handle.getText();
         int originalHandleColor = handle.getCurrentTextColor();
@@ -1474,16 +1611,167 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDeleteNotebook(Notebook notebook) {
+        if (!storageHealthy) return;
         new AlertDialog.Builder(this)
-                .setTitle("حذف الدفتر")
-                .setMessage("هل تريد حذف «" + notebook.name + "» وكل مهامه؟")
+                .setTitle("نقل الدفتر إلى سلة المحذوفات")
+                .setMessage("سيبقى «" + notebook.name + "» في السلة لمدة شهر، ويمكنك استعادته خلالها.")
                 .setNegativeButton("إلغاء", null)
-                .setPositiveButton("حذف", (dialog, which) -> {
+                .setPositiveButton("نقل إلى السلة", (dialog, which) -> {
                     notebooks.remove(notebook);
+                    selectedNotebookIds.remove(notebook.id);
+                    trashedNotebooks.add(new TrashedNotebook(notebook, System.currentTimeMillis()));
                     saveNotebooks();
                     if (detailsDialog != null && detailsDialog.isShowing()) detailsDialog.dismiss();
                     renderCards();
                 }).show();
+    }
+
+    private void showTrashDialog() {
+        boolean trashLoaded;
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
+            trashLoaded = loadTrashFromPreferences();
+            if (trashLoaded) {
+                if (purgeExpiredTrash()) saveNotebooks();
+                else scheduleTrashCleanup();
+            }
+        }
+        if (!trashLoaded) {
+            updateSelectionToolbar();
+            new AlertDialog.Builder(this)
+                    .setTitle("تعذر قراءة سلة المحذوفات")
+                    .setMessage("لم تُحذف محتويات السلة؛ أُوقفت التعديلات لحماية البيانات.")
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+            return;
+        }
+        updateSelectionToolbar();
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = dialogPanel();
+        TextView title = text("سلة المحذوفات", 21, Color.WHITE, true);
+        title.setPadding(0, 0, 0, dp(8));
+        panel.addView(title);
+        TextView hint = text("تُحذف العناصر تلقائيًا بعد شهر من نقلها إلى السلة.", 12, MUTED, false);
+        hint.setPadding(0, 0, 0, dp(10));
+        panel.addView(hint);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(list);
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, dp(330)));
+        TextView close = actionButton("إغلاق", false);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(46));
+        closeParams.topMargin = dp(10);
+        panel.addView(close, closeParams);
+        close.setOnClickListener(v -> dialog.dismiss());
+
+        Runnable[] refreshAction = new Runnable[1];
+        refreshAction[0] = () -> {
+            list.removeAllViews();
+            if (trashedNotebooks.isEmpty()) {
+                TextView empty = text("السلة فارغة", 15, MUTED, false);
+                empty.setGravity(Gravity.CENTER);
+                list.addView(empty, new LinearLayout.LayoutParams(-1, dp(100)));
+                return;
+            }
+            for (TrashedNotebook entry : new ArrayList<>(trashedNotebooks)) {
+                LinearLayout item = new LinearLayout(this);
+                item.setOrientation(LinearLayout.VERTICAL);
+                item.setPadding(dp(12), dp(10), dp(12), dp(10));
+                item.setBackground(roundedSolid(Color.rgb(25, 35, 52), dp(12)));
+                LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, -2);
+                itemParams.bottomMargin = dp(8);
+                list.addView(item, itemParams);
+                TextView name = text(entry.notebook.name, 16, Color.WHITE, true);
+                item.addView(name);
+                TextView dates = text("نُقل إلى السلة: " + formatLocalDate(entry.deletedAtMs)
+                                + "\nيُحذف نهائيًا: " + formatLocalDate(TrashCleanupWorker.expiryTime(entry.deletedAtMs)),
+                        11, MUTED, false);
+                dates.setPadding(0, dp(4), 0, dp(8));
+                item.addView(dates);
+                LinearLayout actions = new LinearLayout(this);
+                actions.setGravity(Gravity.CENTER_VERTICAL);
+                actions.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                TextView restore = actionButton("استعادة", true);
+                TextView deleteForever = actionButton("حذف نهائي", false);
+                LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(40), 1);
+                actionParams.setMargins(dp(3), 0, dp(3), 0);
+                actions.addView(restore, actionParams);
+                actions.addView(deleteForever, new LinearLayout.LayoutParams(0, dp(40), 1));
+                item.addView(actions);
+                restore.setOnClickListener(v -> {
+                    if (System.currentTimeMillis() >= TrashCleanupWorker.expiryTime(entry.deletedAtMs)) {
+                        trashedNotebooks.remove(entry);
+                        saveNotebooks();
+                        refreshAction[0].run();
+                        Toast.makeText(this, "انتهت مدة الاحتفاظ بهذا الدفتر", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    trashedNotebooks.remove(entry);
+                    notebooks.add(entry.notebook);
+                    saveNotebooks();
+                    renderCards();
+                    refreshAction[0].run();
+                });
+                deleteForever.setOnClickListener(v -> new AlertDialog.Builder(this)
+                        .setTitle("حذف نهائي")
+                        .setMessage("سيُحذف الدفتر وملفاته نهائيًا ولا يمكن استعادته.")
+                        .setNegativeButton("إلغاء", null)
+                        .setPositiveButton("حذف نهائيًا", (d, which) -> {
+                            trashedNotebooks.remove(entry);
+                            saveNotebooks();
+                            renderCards();
+                            refreshAction[0].run();
+                        }).show());
+            }
+        };
+        refreshAction[0].run();
+        dialog.setContentView(panel);
+        configureDialog(dialog);
+        dialog.show();
+        sizeDialog(dialog);
+    }
+
+    private boolean loadTrashFromPreferences() {
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
+            trashedNotebooks.clear();
+            String stored = getSharedPreferences("daftri", MODE_PRIVATE).getString("trash", "[]");
+            try {
+                JSONArray array = new JSONArray(stored);
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject entry = array.optJSONObject(i);
+                    if (entry == null) throw new IllegalStateException("Invalid trash entry");
+                    JSONObject notebookObject = entry.optJSONObject("notebook");
+                    if (notebookObject == null) throw new IllegalStateException("Missing trashed notebook");
+                    trashedNotebooks.add(new TrashedNotebook(parseNotebook(notebookObject),
+                            entry.optLong("deletedAt", System.currentTimeMillis())));
+                }
+                return true;
+            } catch (Exception ignored) {
+                trashedNotebooks.clear();
+                storageHealthy = false;
+                return false;
+            }
+        }
+    }
+
+    private boolean purgeExpiredTrash() {
+        long now = System.currentTimeMillis();
+        boolean changed = false;
+        for (int i = trashedNotebooks.size() - 1; i >= 0; i--) {
+            if (now >= TrashCleanupWorker.expiryTime(trashedNotebooks.get(i).deletedAtMs)) {
+                trashedNotebooks.remove(i);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private void scheduleTrashCleanup() {
+        long earliestExpiry = Long.MAX_VALUE;
+        for (TrashedNotebook entry : trashedNotebooks) {
+            earliestExpiry = Math.min(earliestExpiry, TrashCleanupWorker.expiryTime(entry.deletedAtMs));
+        }
+        TrashCleanupWorker.schedule(this, earliestExpiry == Long.MAX_VALUE ? 0L : earliestExpiry);
     }
 
     private String saveTaskImageLocally(Uri uri) throws IOException {
@@ -1553,85 +1841,355 @@ public class MainActivity extends Activity {
     }
 
     private void cleanupUnusedTaskImages() {
-        Set<String> referenced = new HashSet<>();
-        for (Notebook notebook : notebooks) {
-            if (notebook.titleImageFileName != null) referenced.add(notebook.titleImageFileName);
-            for (TaskEntry task : notebook.tasks) {
-                referenced.addAll(task.imageFileNames);
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
+            Set<String> referenced = new HashSet<>();
+            for (Notebook notebook : notebooks) collectNotebookImages(notebook, referenced);
+            for (TrashedNotebook entry : trashedNotebooks) collectNotebookImages(entry.notebook, referenced);
+            File[] imageFiles = taskImageDirectory().listFiles();
+            if (imageFiles == null) return;
+            for (File imageFile : imageFiles) {
+                if (imageFile.isFile() && !referenced.contains(imageFile.getName())) imageFile.delete();
             }
-        }
-        File[] imageFiles = taskImageDirectory().listFiles();
-        if (imageFiles == null) return;
-        for (File imageFile : imageFiles) {
-            if (imageFile.isFile() && !referenced.contains(imageFile.getName())) imageFile.delete();
         }
     }
 
-    private void loadNotebooks() {
-        notebooks.clear();
-        String stored = getSharedPreferences("daftri", MODE_PRIVATE).getString("notebooks", "[]");
-        try {
-            JSONArray array = new JSONArray(stored);
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject object = array.getJSONObject(i);
-                JSONArray taskArray = object.optJSONArray("tasks");
-                ArrayList<TaskEntry> tasks = new ArrayList<>();
-                if (taskArray != null) {
-                    for (int j = 0; j < taskArray.length(); j++) {
-                        Object savedTask = taskArray.opt(j);
-                        if (savedTask instanceof JSONObject) {
-                            JSONObject taskObject = (JSONObject) savedTask;
-                            TaskEntry task = new TaskEntry(taskObject.optString("text", ""), null);
-                            JSONArray savedImages = taskObject.optJSONArray("images");
-                            if (savedImages != null) {
-                                for (int imageIndex = 0; imageIndex < savedImages.length(); imageIndex++) {
-                                    String fileName = savedImages.optString(imageIndex, null);
-                                    if (fileName != null && !fileName.isEmpty()) task.imageFileNames.add(fileName);
-                                }
-                            } else {
-                                String oldImage = taskObject.optString("image", null);
-                                if (oldImage != null && !oldImage.isEmpty()) task.imageFileNames.add(oldImage);
-                            }
-                            tasks.add(task);
-                        } else {
-                            tasks.add(new TaskEntry(taskArray.optString(j, ""), null));
-                        }
-                    }
-                }
-                notebooks.add(new Notebook(object.optString("id", UUID.randomUUID().toString()),
-                        object.optString("name", "دفتر"), tasks, object.optInt("color", CARD_COLORS[0]),
-                        object.optString("titleImage", null)));
-            }
-        } catch (Exception ignored) {
+    private void collectNotebookImages(Notebook notebook, Set<String> referenced) {
+        if (notebook.titleImageFileName != null) referenced.add(notebook.titleImageFileName);
+        for (TaskEntry task : notebook.tasks) referenced.addAll(task.imageFileNames);
+    }
+
+    private boolean loadNotebooks() {
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
             notebooks.clear();
+            String stored = getSharedPreferences("daftri", MODE_PRIVATE).getString("notebooks", "[]");
+            boolean notebooksRead = true;
+            try {
+                JSONArray array = new JSONArray(stored);
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject object = array.optJSONObject(i);
+                    if (object == null) throw new IllegalStateException("Invalid notebook entry");
+                    notebooks.add(parseNotebook(object));
+                }
+            } catch (Exception ignored) {
+                notebooks.clear();
+                notebooksRead = false;
+            }
+            boolean trashRead = loadTrashFromPreferences();
+            storageHealthy = notebooksRead && trashRead;
+            if (!storageHealthy) return false;
+            purgeExpiredTrash();
+            saveNotebooks();
+            return true;
         }
+    }
+
+    private Notebook parseNotebook(JSONObject object) {
+        JSONArray taskArray = object.optJSONArray("tasks");
+        ArrayList<TaskEntry> tasks = new ArrayList<>();
+        if (taskArray != null) {
+            for (int j = 0; j < taskArray.length(); j++) {
+                Object savedTask = taskArray.opt(j);
+                if (savedTask instanceof JSONObject) {
+                    JSONObject taskObject = (JSONObject) savedTask;
+                    TaskEntry task = new TaskEntry(taskObject.optString("text", ""), null,
+                            taskObject.optLong("createdAt", System.currentTimeMillis()));
+                    JSONArray savedImages = taskObject.optJSONArray("images");
+                    if (savedImages != null) {
+                        for (int imageIndex = 0; imageIndex < savedImages.length(); imageIndex++) {
+                            String fileName = savedImages.optString(imageIndex, null);
+                            if (fileName != null && !fileName.isEmpty()) task.imageFileNames.add(fileName);
+                        }
+                    } else {
+                        String oldImage = taskObject.optString("image", null);
+                        if (oldImage != null && !oldImage.isEmpty()) task.imageFileNames.add(oldImage);
+                    }
+                    tasks.add(task);
+                } else {
+                    tasks.add(new TaskEntry(taskArray.optString(j, ""), null));
+                }
+            }
+        }
+        return new Notebook(object.optString("id", UUID.randomUUID().toString()),
+                object.optString("name", "دفتر"), tasks, object.optInt("color", CARD_COLORS[0]),
+                object.optString("titleImage", null), object.optLong("createdAt", System.currentTimeMillis()));
+    }
+
+    private JSONObject notebookToJson(Notebook notebook) throws Exception {
+        JSONObject object = new JSONObject();
+        object.put("id", notebook.id);
+        object.put("name", notebook.name);
+        object.put("color", notebook.color);
+        object.put("createdAt", notebook.createdAtMs);
+        if (notebook.titleImageFileName != null) object.put("titleImage", notebook.titleImageFileName);
+        JSONArray tasks = new JSONArray();
+        for (TaskEntry task : notebook.tasks) {
+            JSONObject taskObject = new JSONObject();
+            taskObject.put("text", task.text);
+            taskObject.put("createdAt", task.createdAtMs);
+            JSONArray images = new JSONArray();
+            for (String fileName : task.imageFileNames) images.put(fileName);
+            taskObject.put("images", images);
+            tasks.put(taskObject);
+        }
+        object.put("tasks", tasks);
+        return object;
     }
 
     private void saveNotebooks() {
-        JSONArray array = new JSONArray();
-        try {
-            for (Notebook notebook : notebooks) {
-                JSONObject object = new JSONObject();
-                object.put("id", notebook.id);
-                object.put("name", notebook.name);
-                object.put("color", notebook.color);
-                if (notebook.titleImageFileName != null) object.put("titleImage", notebook.titleImageFileName);
-                JSONArray tasks = new JSONArray();
-                for (TaskEntry task : notebook.tasks) {
-                    JSONObject taskObject = new JSONObject();
-                    taskObject.put("text", task.text);
-                    JSONArray images = new JSONArray();
-                    for (String fileName : task.imageFileNames) images.put(fileName);
-                    taskObject.put("images", images);
-                    tasks.put(taskObject);
+        if (!storageHealthy) return;
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
+            JSONArray notebookArray = new JSONArray();
+            JSONArray trashArray = new JSONArray();
+            try {
+                for (Notebook notebook : notebooks) notebookArray.put(notebookToJson(notebook));
+                for (TrashedNotebook entry : trashedNotebooks) {
+                    JSONObject trashObject = new JSONObject();
+                    trashObject.put("deletedAt", entry.deletedAtMs);
+                    trashObject.put("notebook", notebookToJson(entry.notebook));
+                    trashArray.put(trashObject);
                 }
-                object.put("tasks", tasks);
-                array.put(object);
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
+            getSharedPreferences("daftri", MODE_PRIVATE).edit()
+                    .putString("notebooks", notebookArray.toString())
+                    .putString("trash", trashArray.toString())
+                    .apply();
+            scheduleTrashCleanup();
+            cleanupUnusedTaskImages();
         }
-        getSharedPreferences("daftri", MODE_PRIVATE).edit().putString("notebooks", array.toString()).apply();
-        cleanupUnusedTaskImages();
+    }
+
+    private String formatLocalDate(long millis) {
+        Locale locale = Locale.getDefault();
+        String pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEE d/M/y");
+        SimpleDateFormat formatter = new SimpleDateFormat(pattern, locale);
+        formatter.setTimeZone(TimeZone.getDefault());
+        return formatter.format(new Date(millis));
+    }
+
+    private String toArabicDigits(String value) {
+        return value.replace('0', '٠').replace('1', '١').replace('2', '٢')
+                .replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦')
+                .replace('7', '٧').replace('8', '٨').replace('9', '٩');
+    }
+
+    private Notebook snapshotNotebook(Notebook source) {
+        ArrayList<TaskEntry> copiedTasks = new ArrayList<>();
+        for (TaskEntry task : source.tasks) {
+            TaskEntry copy = new TaskEntry(task.text, null, task.createdAtMs);
+            copy.imageFileNames.addAll(task.imageFileNames);
+            copiedTasks.add(copy);
+        }
+        return new Notebook(source.id, source.name, copiedTasks, source.color,
+                source.titleImageFileName, source.createdAtMs);
+    }
+
+    private void beginPdfExport() {
+        if (pdfExporting) return;
+        ArrayList<Notebook> selected = new ArrayList<>();
+        for (String selectedId : selectedNotebookIds) {
+            for (Notebook notebook : notebooks) {
+                if (notebook.id.equals(selectedId)) {
+                    selected.add(snapshotNotebook(notebook));
+                    break;
+                }
+            }
+        }
+        if (selected.size() < 2) {
+            Toast.makeText(this, "حدد دفترين أو أكثر لإنشاء PDF", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        File exportDirectory = new File(getCacheDir(), "pdf_exports");
+        if (!exportDirectory.exists() && !exportDirectory.mkdirs()) {
+            Toast.makeText(this, "تعذر تجهيز ملف PDF", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        File outputFile = new File(exportDirectory, "Daftri_" + System.currentTimeMillis() + ".pdf");
+        pdfExporting = true;
+        updateSelectionToolbar();
+        new Thread(() -> {
+            boolean generated = false;
+            try {
+                writeSelectionPdf(selected, outputFile);
+                generated = outputFile.isFile() && outputFile.length() > 0;
+            } catch (Exception ignored) {
+                outputFile.delete();
+            }
+            boolean ready = generated;
+            runOnUiThread(() -> {
+                pdfExporting = false;
+                updateSelectionToolbar();
+                if (!ready || isFinishing() || isDestroyed()) {
+                    outputFile.delete();
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this, "تعذر إنشاء ملف PDF", Toast.LENGTH_SHORT).show();
+                    }
+                    return;
+                }
+                pendingPdfFile = outputFile;
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("application/pdf");
+                intent.putExtra(Intent.EXTRA_TITLE, "Daftri_" + System.currentTimeMillis() + ".pdf");
+                try {
+                    startActivityForResult(intent, REQUEST_CREATE_PDF);
+                } catch (Exception error) {
+                    pendingPdfFile = null;
+                    outputFile.delete();
+                    Toast.makeText(this, "لا يتوفر تطبيق لحفظ ملف PDF", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }, "daftri-pdf-export").start();
+    }
+
+    private void writeSelectionPdf(List<Notebook> selected, File outputFile) throws IOException {
+        PdfDocument document = new PdfDocument();
+        PdfPageState page = new PdfPageState(document);
+        try {
+            TextPaint h1 = pdfTextPaint(23, Color.rgb(18, 91, 176), true);
+            TextPaint h2 = pdfTextPaint(16, Color.rgb(20, 40, 68), true);
+            TextPaint body = pdfTextPaint(12, Color.rgb(30, 35, 42), false);
+            TextPaint date = pdfTextPaint(10, Color.rgb(95, 105, 116), false);
+            for (int cardIndex = 0; cardIndex < selected.size(); cardIndex++) {
+                Notebook notebook = selected.get(cardIndex);
+                if (cardIndex > 0) page.startNextPage();
+                drawPdfParagraph(page, notebook.name, h1, 10);
+                drawPdfParagraph(page, "تاريخ إنشاء الدفتر: " + formatLocalDate(notebook.createdAtMs), date, 12);
+                if (notebook.titleImageFileName != null) {
+                    drawPdfImage(page, notebook.titleImageFileName);
+                }
+                for (int taskIndex = 0; taskIndex < notebook.tasks.size(); taskIndex++) {
+                    TaskEntry task = notebook.tasks.get(taskIndex);
+                    drawPdfParagraph(page, "المهمة " + toArabicDigits(String.valueOf(taskIndex + 1)), h2, 3);
+                    drawPdfParagraph(page, "تاريخ إنشاء المهمة: " + formatLocalDate(task.createdAtMs), date, 4);
+                    if (!task.text.trim().isEmpty()) drawPdfParagraph(page, task.text, body, 7);
+                    for (String imageFileName : task.imageFileNames) drawPdfImage(page, imageFileName);
+                }
+            }
+            page.finish();
+            try (FileOutputStream output = new FileOutputStream(outputFile)) {
+                document.writeTo(output);
+            }
+        } finally {
+            document.close();
+        }
+    }
+
+    private TextPaint pdfTextPaint(float textSize, int color, boolean bold) {
+        TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+        paint.setTextSize(textSize);
+        paint.setColor(color);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL));
+        return paint;
+    }
+
+    private StaticLayout createPdfLayout(CharSequence text, TextPaint paint, int width) {
+        return StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
+                .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
+                .setTextDirection(TextDirectionHeuristics.RTL)
+                .setLineSpacing(0f, 1.08f)
+                .setIncludePad(false)
+                .build();
+    }
+
+    private void drawPdfParagraph(PdfPageState page, String value, TextPaint paint, int gapAfter) {
+        if (value == null || value.isEmpty()) return;
+        StaticLayout layout = createPdfLayout(value, paint, PdfPageState.CONTENT_WIDTH);
+        for (int lineIndex = 0; lineIndex < layout.getLineCount(); lineIndex++) {
+            int lineTop = layout.getLineTop(lineIndex);
+            int lineBottom = layout.getLineBottom(lineIndex);
+            int lineHeight = Math.max(1, lineBottom - lineTop);
+            page.ensureRoom(lineHeight);
+            Canvas canvas = page.page.getCanvas();
+            int save = canvas.save();
+            canvas.translate(PdfPageState.MARGIN, page.y - lineTop);
+            canvas.clipRect(0, lineTop, PdfPageState.CONTENT_WIDTH, lineBottom);
+            layout.draw(canvas);
+            canvas.restoreToCount(save);
+            page.y += lineHeight;
+        }
+        page.y += gapAfter;
+    }
+
+    private void drawPdfImage(PdfPageState page, String fileName) {
+        File file = taskImageFile(fileName);
+        if (file == null || !file.isFile()) return;
+        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+        if (bitmap == null) return;
+        try {
+            float maxWidth = PdfPageState.CONTENT_WIDTH;
+            float maxHeight = PdfPageState.PAGE_HEIGHT - PdfPageState.MARGIN * 2f;
+            float scale = Math.min(1f, Math.min(maxWidth / bitmap.getWidth(), maxHeight / bitmap.getHeight()));
+            float width = bitmap.getWidth() * scale;
+            float height = bitmap.getHeight() * scale;
+            page.ensureRoom((int) height + 12);
+            float left = PdfPageState.MARGIN + (PdfPageState.CONTENT_WIDTH - width) / 2f;
+            Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            page.page.getCanvas().drawBitmap(bitmap, null,
+                    new android.graphics.RectF(left, page.y, left + width, page.y + height), imagePaint);
+            page.y += height + 12;
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
+    private void finishPdfSave(int resultCode, Intent data) {
+        File source = pendingPdfFile;
+        pendingPdfFile = null;
+        if (source == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            source.delete();
+            return;
+        }
+        try (InputStream input = new java.io.FileInputStream(source);
+             OutputStream output = getContentResolver().openOutputStream(data.getData(), "w")) {
+            if (output == null) throw new IOException("PDF destination could not be opened");
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            output.flush();
+            Toast.makeText(this, "تم حفظ ملف PDF", Toast.LENGTH_SHORT).show();
+        } catch (Exception error) {
+            Toast.makeText(this, "تعذر حفظ ملف PDF", Toast.LENGTH_SHORT).show();
+        } finally {
+            source.delete();
+        }
+    }
+
+    private static final class PdfPageState {
+        static final int PAGE_WIDTH = 595;
+        static final int PAGE_HEIGHT = 842;
+        static final int MARGIN = 42;
+        static final int CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+        static final int BOTTOM = PAGE_HEIGHT - MARGIN;
+        final PdfDocument document;
+        PdfDocument.Page page;
+        int pageNumber;
+        float y;
+
+        PdfPageState(PdfDocument document) {
+            this.document = document;
+            startNextPage();
+        }
+
+        void startNextPage() {
+            if (page != null) document.finishPage(page);
+            PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, ++pageNumber).create();
+            page = document.startPage(info);
+            page.getCanvas().drawColor(Color.WHITE);
+            y = MARGIN;
+        }
+
+        void ensureRoom(int height) {
+            if (y + height > BOTTOM && y > MARGIN) startNextPage();
+        }
+
+        void finish() {
+            if (page != null) {
+                document.finishPage(page);
+                page = null;
+            }
+        }
     }
 
     private LinearLayout dialogPanel() {
@@ -1650,7 +2208,7 @@ public class MainActivity extends Activity {
         input.setTextColor(Color.WHITE);
         input.setHintTextColor(MUTED);
         input.setHint(hint);
-        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         input.setPadding(dp(14), 0, dp(14), 0);
         input.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         input.setBackground(roundedSolid(Color.rgb(25, 35, 52), dp(13)));
@@ -1664,7 +2222,7 @@ public class MainActivity extends Activity {
         input.setHorizontallyScrolling(false);
         input.setMinLines(1);
         input.setMinHeight(dp(49));
-        input.setGravity(Gravity.TOP | Gravity.RIGHT);
+        input.setGravity(Gravity.TOP | Gravity.END);
         input.setPadding(dp(14), dp(10), dp(14), dp(10));
         return input;
     }
@@ -1836,10 +2394,16 @@ public class MainActivity extends Activity {
 
     private static class TaskEntry {
         String text;
+        final long createdAtMs;
         final ArrayList<String> imageFileNames = new ArrayList<>();
 
         TaskEntry(String text, String imageFileName) {
+            this(text, imageFileName, System.currentTimeMillis());
+        }
+
+        TaskEntry(String text, String imageFileName, long createdAtMs) {
             this.text = text == null ? "" : text;
+            this.createdAtMs = createdAtMs > 0L ? createdAtMs : System.currentTimeMillis();
             if (imageFileName != null && !imageFileName.isEmpty()) imageFileNames.add(imageFileName);
         }
     }
@@ -1848,14 +2412,32 @@ public class MainActivity extends Activity {
         final String id;
         String name;
         final ArrayList<TaskEntry> tasks;
+        final long createdAtMs;
         int color;
         String titleImageFileName;
+
         Notebook(String id, String name, List<TaskEntry> tasks, int color, String titleImageFileName) {
+            this(id, name, tasks, color, titleImageFileName, System.currentTimeMillis());
+        }
+
+        Notebook(String id, String name, List<TaskEntry> tasks, int color, String titleImageFileName,
+                 long createdAtMs) {
             this.id = id;
             this.name = name;
             this.tasks = new ArrayList<>(tasks);
             this.color = color;
             this.titleImageFileName = titleImageFileName;
+            this.createdAtMs = createdAtMs > 0L ? createdAtMs : System.currentTimeMillis();
+        }
+    }
+
+    private static class TrashedNotebook {
+        final Notebook notebook;
+        final long deletedAtMs;
+
+        TrashedNotebook(Notebook notebook, long deletedAtMs) {
+            this.notebook = notebook;
+            this.deletedAtMs = deletedAtMs > 0L ? deletedAtMs : System.currentTimeMillis();
         }
     }
 }

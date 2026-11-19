@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="selected_count">المحدد: %1$s</string>
+    <string name="trash_count">سلة المحذوفات · %1$s</string>
+    <string name="pdf_exporting">جارٍ إعداد PDF…</string>
+    <string name="pdf_export">إنشاء PDF</string>
+</resources>

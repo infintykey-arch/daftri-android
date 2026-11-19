@@ -20,8 +20,8 @@ android {
         applicationId 'com.cue.daftri'
         minSdk 23
         targetSdk 35
-        versionCode 14
-        versionName '1.13'
+        versionCode 15
+        versionName '1.14'
         manifestPlaceholders = [admobAppId: 'ca-app-pub-8393179162461898~8514526557']
         buildConfigField 'String', 'ADMOB_BANNER_AD_UNIT_ID', '"ca-app-pub-8393179162461898/1487063710"'
         buildConfigField 'String', 'ADMOB_NATIVE_AD_UNIT_ID', '"ca-app-pub-8393179162461898/5282179357"'
@@ -71,7 +71,14 @@ android {
     }
 }
 
+// WorkManager's empty conflict placeholder omits the ListenableFuture API required to compile Worker.
+configurations.configureEach {
+    resolutionStrategy.force 'com.google.guava:listenablefuture:1.0'
+}
+
 dependencies {
     implementation 'com.google.android.gms:play-services-ads:25.4.0'
     implementation 'com.google.android.ump:user-messaging-platform:4.0.0'
+    implementation 'androidx.work:work-runtime:2.10.1'
+    implementation 'com.google.guava:listenablefuture:1.0'
 }
