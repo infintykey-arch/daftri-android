@@ -41,6 +41,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
+import android.widget.DatePicker;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -100,6 +101,9 @@ public class MainActivity extends Activity {
     private static final int PANEL = Color.rgb(12, 17, 26);
     private static final int MUTED = Color.rgb(187, 198, 213);
     private static final int BLUE = Color.rgb(24, 145, 255);
+    private static final int DESTINATION_TASKS = 0;
+    private static final int DESTINATION_CALENDAR = 1;
+    private static final int DESTINATION_TRASH = 2;
     private static final int[] CARD_COLORS = {
             Color.rgb(18, 91, 176), Color.rgb(22, 112, 207),
             Color.rgb(16, 69, 139), Color.rgb(42, 52, 67),
@@ -111,11 +115,18 @@ public class MainActivity extends Activity {
     private final LinkedHashSet<String> selectedNotebookIds = new LinkedHashSet<>();
     private LinearLayout cardsContainer;
     private ScrollView cardsScroll;
+    private LinearLayout contentHost;
     private LinearLayout selectionToolbar;
     private TextView selectionModeButton;
     private TextView selectionStatus;
     private TextView exportPdfButton;
-    private TextView trashButton;
+    private TextView appTitle;
+    private TextView appSubtitle;
+    private TextView tasksNavigationButton;
+    private TextView calendarNavigationButton;
+    private TextView trashNavigationButton;
+    private FrameLayout addFooter;
+    private int currentDestination = DESTINATION_TASKS;
     private boolean selectingNotebooks;
     private boolean pdfExporting;
     private boolean storageHealthy = true;
@@ -336,72 +347,42 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         root.setBackgroundColor(BG);
-        root.setPadding(dp(18), dp(18), dp(18), dp(10));
+        root.setPadding(dp(18), dp(14), dp(18), 0);
 
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        ImageView logo = brandMark(58);
-        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(58), dp(58));
-        logoParams.setMarginEnd(dp(12));
+        ImageView logo = brandMark(48);
+        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        logoParams.setMarginEnd(dp(11));
         heading.addView(logo, logoParams);
         LinearLayout titleBlock = new LinearLayout(this);
         titleBlock.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("دفتر مهامي", 27, Color.WHITE, true);
-        title.setShadowLayer(dp(8), 0, 0, 0x88218FFF);
-        TextView subtitle = text("كل أفكارك ومهامك في مكان واحد", 14, MUTED, false);
-        subtitle.setPadding(0, dp(4), 0, 0);
-        titleBlock.addView(title);
-        titleBlock.addView(subtitle);
+        appTitle = text("دفتر مهامي", 25, Color.WHITE, true);
+        appTitle.setShadowLayer(dp(8), 0, 0, 0x88218FFF);
+        appSubtitle = text("كل أفكارك ومهامك في مكان واحد", 13, MUTED, false);
+        appSubtitle.setPadding(0, dp(3), 0, 0);
+        titleBlock.addView(appTitle);
+        titleBlock.addView(appSubtitle);
         heading.addView(titleBlock, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView calendarButton = actionButton("تقويم", false);
-        calendarButton.setTextSize(12);
-        calendarButton.setContentDescription("اختيار يوم لعرض الدفاتر والمهام المُنشأة فيه");
-        LinearLayout.LayoutParams calendarParams = new LinearLayout.LayoutParams(dp(62), dp(44));
-        calendarParams.setMargins(dp(2), 0, dp(2), 0);
-        heading.addView(calendarButton, calendarParams);
-        calendarButton.setOnClickListener(v -> showCreationDatePicker());
         privacyOptionsButton = text("⋮", 25, MUTED, true);
         privacyOptionsButton.setGravity(Gravity.CENTER);
         privacyOptionsButton.setContentDescription("خيارات الخصوصية");
         privacyOptionsButton.setBackground(rippleBackground(0x33218FFF, dp(18)));
         privacyOptionsButton.setVisibility(View.GONE);
         privacyOptionsButton.setOnClickListener(v -> showPrivacyOptions());
-        heading.addView(privacyOptionsButton, new LinearLayout.LayoutParams(dp(42), dp(48)));
-        root.addView(heading, new LinearLayout.LayoutParams(-1, dp(76)));
+        heading.addView(privacyOptionsButton, new LinearLayout.LayoutParams(dp(42), dp(46)));
+        root.addView(heading, new LinearLayout.LayoutParams(-1, dp(64)));
+
         View energyLine = new View(this);
         energyLine.setBackground(roundedGradient(BLUE, Color.rgb(175, 192, 213), dp(2)));
         energyLine.setAlpha(0.82f);
         root.addView(energyLine, new LinearLayout.LayoutParams(-1, dp(2)));
 
-        selectionToolbar = new LinearLayout(this);
-        selectionToolbar.setOrientation(LinearLayout.HORIZONTAL);
-        selectionToolbar.setGravity(Gravity.CENTER_VERTICAL);
-        selectionToolbar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        selectionToolbar.setPadding(0, dp(5), 0, dp(3));
-        selectionModeButton = actionButton("تحديد بطاقات", false);
-        selectionModeButton.setOnClickListener(v -> toggleNotebookSelectionMode());
-        selectionStatus = text("", 12, MUTED, true);
-        selectionStatus.setGravity(Gravity.CENTER);
-        trashButton = actionButton("سلة المحذوفات", false);
-        trashButton.setOnClickListener(v -> showTrashDialog());
-        exportPdfButton = actionButton("إنشاء PDF", true);
-        exportPdfButton.setOnClickListener(v -> beginPdfExport());
-        selectionToolbar.addView(selectionModeButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        selectionToolbar.addView(trashButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        selectionToolbar.addView(selectionStatus, new LinearLayout.LayoutParams(0, dp(42), 1));
-        selectionToolbar.addView(exportPdfButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        root.addView(selectionToolbar, new LinearLayout.LayoutParams(-1, dp(50)));
-
-        cardsScroll = new ScrollView(this);
-        cardsScroll.setFillViewport(true);
-        cardsScroll.setClipToPadding(false);
-        cardsScroll.setPadding(0, dp(10), 0, dp(8));
-        cardsContainer = new LinearLayout(this);
-        cardsContainer.setOrientation(LinearLayout.VERTICAL);
-        cardsContainer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        cardsScroll.addView(cardsContainer, new ScrollView.LayoutParams(-1, -2));
-        root.addView(cardsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        contentHost = new LinearLayout(this);
+        contentHost.setOrientation(LinearLayout.VERTICAL);
+        contentHost.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.addView(contentHost, new LinearLayout.LayoutParams(-1, 0, 1));
 
         bannerContainer = new FrameLayout(this);
         bannerContainer.setPadding(0, dp(4), 0, dp(4));
@@ -416,37 +397,134 @@ public class MainActivity extends Activity {
                 new FrameLayout.LayoutParams(-1, dp(50), Gravity.CENTER));
         root.addView(bannerContainer, new LinearLayout.LayoutParams(-1, -2));
 
-        FrameLayout footer = new FrameLayout(this);
-        footer.setClipChildren(false);
-        footer.setClipToPadding(false);
+        addFooter = new FrameLayout(this);
+        addFooter.setClipChildren(false);
+        addFooter.setClipToPadding(false);
         View halo = new View(this);
         halo.setBackground(glowHaloBackground());
         halo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        FrameLayout.LayoutParams haloParams = new FrameLayout.LayoutParams(dp(60), dp(60), Gravity.CENTER);
-        footer.addView(halo, haloParams);
+        addFooter.addView(halo, new FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER));
         startGlowPulse(halo);
-        TextView add = text("＋", 34, Color.WHITE, false);
+        TextView add = text("＋", 31, Color.WHITE, false);
         add.setGravity(Gravity.CENTER);
         add.setBackground(circleBackground());
         add.setElevation(dp(8));
-        applyElectricGlow(add, 9, true);
+        applyElectricGlow(add, 8, true);
         add.setContentDescription("إضافة دفتر جديد");
         add.setEnabled(storageHealthy);
         if (!storageHealthy) add.setAlpha(0.45f);
         add.setOnClickListener(v -> showEditor(null));
-        FrameLayout.LayoutParams addParams = new FrameLayout.LayoutParams(dp(62), dp(62), Gravity.CENTER);
-        footer.addView(add, addParams);
-        root.addView(footer, new LinearLayout.LayoutParams(-1, dp(72)));
+        addFooter.addView(add, new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER));
+        root.addView(addFooter, new LinearLayout.LayoutParams(-1, dp(58)));
+
+        LinearLayout bottomNavigation = new LinearLayout(this);
+        bottomNavigation.setOrientation(LinearLayout.HORIZONTAL);
+        bottomNavigation.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        bottomNavigation.setGravity(Gravity.CENTER_VERTICAL);
+        bottomNavigation.setPadding(dp(4), dp(4), dp(4), dp(6));
+        bottomNavigation.setBackground(roundedStroke(Color.rgb(12, 17, 26), 0x66547BA5, dp(18)));
+        calendarNavigationButton = createNavigationButton("▦", "التقويم", DESTINATION_CALENDAR);
+        tasksNavigationButton = createNavigationButton("⌂", "الرئيسية", DESTINATION_TASKS);
+        trashNavigationButton = createNavigationButton("♲", "السلة", DESTINATION_TRASH);
+        bottomNavigation.addView(calendarNavigationButton, new LinearLayout.LayoutParams(0, dp(54), 1));
+        bottomNavigation.addView(tasksNavigationButton, new LinearLayout.LayoutParams(0, dp(54), 1));
+        bottomNavigation.addView(trashNavigationButton, new LinearLayout.LayoutParams(0, dp(54), 1));
+        root.addView(bottomNavigation, new LinearLayout.LayoutParams(-1, dp(62)));
 
         setContentView(root);
-        renderCards();
+        renderDestinationContent();
     }
 
-    private void toggleNotebookSelectionMode() {
-        selectingNotebooks = !selectingNotebooks;
-        if (!selectingNotebooks) selectedNotebookIds.clear();
-        updateSelectionToolbar();
-        renderCards();
+    private TextView createNavigationButton(String icon, String label, int destination) {
+        TextView button = text(icon + "\n" + label, 11, Color.rgb(199, 214, 234), true);
+        button.setGravity(Gravity.CENTER);
+        button.setLineSpacing(0, 0.94f);
+        button.setContentDescription(label);
+        button.setBackground(rippleBackground(0x00000000, dp(13)));
+        button.setOnClickListener(v -> navigateTo(destination));
+        return button;
+    }
+
+    private void navigateTo(int destination) {
+        if (destination != DESTINATION_TASKS) {
+            selectingNotebooks = false;
+            selectedNotebookIds.clear();
+        }
+        currentDestination = destination;
+        renderDestinationContent();
+    }
+
+    private void renderDestinationContent() {
+        if (contentHost == null) return;
+        if (nativeAdCard != null && nativeAdCard.getParent() instanceof ViewGroup) {
+            ((ViewGroup) nativeAdCard.getParent()).removeView(nativeAdCard);
+        }
+        contentHost.removeAllViews();
+        if (currentDestination == DESTINATION_CALENDAR) {
+            appTitle.setText("التقويم");
+            appSubtitle.setText("تابع تواريخ إنشاء دفاترك ومهامك");
+            addFooter.setVisibility(View.GONE);
+            renderCalendarDestination();
+        } else if (currentDestination == DESTINATION_TRASH) {
+            appTitle.setText("سلة المحذوفات");
+            appSubtitle.setText("يمكنك استعادة الدفاتر خلال ٣٠ يومًا");
+            addFooter.setVisibility(View.GONE);
+            renderTrashDestination();
+        } else {
+            appTitle.setText("دفتر مهامي");
+            appSubtitle.setText("كل أفكارك ومهامك في مكان واحد");
+            addFooter.setVisibility(View.VISIBLE);
+
+            selectionToolbar = new LinearLayout(this);
+            selectionToolbar.setOrientation(LinearLayout.HORIZONTAL);
+            selectionToolbar.setGravity(Gravity.CENTER_VERTICAL);
+            selectionToolbar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            selectionToolbar.setPadding(0, dp(6), 0, dp(4));
+            selectionModeButton = actionButton("إلغاء التحديد", false);
+            selectionModeButton.setOnClickListener(v -> {
+                selectingNotebooks = false;
+                selectedNotebookIds.clear();
+                renderCards();
+            });
+            selectionStatus = text("", 12, MUTED, true);
+            selectionStatus.setGravity(Gravity.CENTER);
+            exportPdfButton = actionButton("إنشاء PDF", true);
+            exportPdfButton.setOnClickListener(v -> beginPdfExport());
+            selectionToolbar.addView(selectionModeButton,
+                    new LinearLayout.LayoutParams(0, dp(42), 1));
+            selectionToolbar.addView(selectionStatus,
+                    new LinearLayout.LayoutParams(0, dp(42), 1));
+            selectionToolbar.addView(exportPdfButton,
+                    new LinearLayout.LayoutParams(0, dp(42), 1));
+            contentHost.addView(selectionToolbar, new LinearLayout.LayoutParams(-1, dp(50)));
+
+            cardsScroll = new ScrollView(this);
+            cardsScroll.setFillViewport(true);
+            cardsScroll.setClipToPadding(false);
+            cardsScroll.setPadding(0, dp(6), 0, dp(8));
+            cardsContainer = new LinearLayout(this);
+            cardsContainer.setOrientation(LinearLayout.VERTICAL);
+            cardsContainer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            cardsScroll.addView(cardsContainer, new ScrollView.LayoutParams(-1, -2));
+            contentHost.addView(cardsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            renderCards();
+        }
+        updateNavigationAppearance();
+    }
+
+    private void updateNavigationAppearance() {
+        updateNavigationButton(calendarNavigationButton, DESTINATION_CALENDAR);
+        updateNavigationButton(tasksNavigationButton, DESTINATION_TASKS);
+        updateNavigationButton(trashNavigationButton, DESTINATION_TRASH);
+    }
+
+    private void updateNavigationButton(TextView button, int destination) {
+        if (button == null) return;
+        boolean selected = currentDestination == destination;
+        button.setTextColor(selected ? Color.WHITE : Color.rgb(199, 214, 234));
+        button.setBackground(selected
+                ? roundedStroke(Color.rgb(17, 55, 91), 0xFF3E9FFF, dp(13))
+                : roundedSolid(Color.TRANSPARENT, dp(13)));
     }
 
     private void toggleNotebookSelection(Notebook notebook) {
@@ -457,19 +535,15 @@ public class MainActivity extends Activity {
     }
 
     private void updateSelectionToolbar() {
-        if (selectionModeButton == null) return;
-        selectionModeButton.setText(selectingNotebooks ? "إلغاء التحديد" : "تحديد بطاقات");
-        selectionModeButton.setVisibility(View.VISIBLE);
+        if (selectionToolbar == null || selectionModeButton == null) return;
+        selectionToolbar.setVisibility(selectingNotebooks && currentDestination == DESTINATION_TASKS
+                ? View.VISIBLE : View.GONE);
         selectionModeButton.setEnabled(storageHealthy);
-        trashButton.setEnabled(storageHealthy);
-        trashButton.setVisibility(selectingNotebooks ? View.GONE : View.VISIBLE);
         selectionStatus.setVisibility(selectingNotebooks ? View.VISIBLE : View.GONE);
         exportPdfButton.setVisibility(selectingNotebooks && selectedNotebookIds.size() > 1
                 ? View.VISIBLE : View.GONE);
         selectionStatus.setText(getString(R.string.selected_count,
                 toArabicDigits(String.valueOf(selectedNotebookIds.size()))));
-        trashButton.setText(getString(R.string.trash_count,
-                toArabicDigits(String.valueOf(trashedNotebooks.size()))));
         exportPdfButton.setEnabled(storageHealthy && !pdfExporting);
         if (pdfExporting) exportPdfButton.setText(R.string.pdf_exporting);
         else exportPdfButton.setText(R.string.pdf_export);
@@ -1009,6 +1083,17 @@ public class MainActivity extends Activity {
             if (selectingNotebooks) toggleNotebookSelection(notebook);
             else showDetails(notebook);
         });
+        card.setContentDescription("" + notebook.name + "؛ اضغط لفتحها أو اضغط مطولًا لتحديدها");
+        card.setOnLongClickListener(v -> {
+            if (!selectingNotebooks) {
+                selectingNotebooks = true;
+                selectedNotebookIds.clear();
+            }
+            if (!selectedNotebookIds.contains(notebook.id)) selectedNotebookIds.add(notebook.id);
+            updateSelectionToolbar();
+            renderCards();
+            return true;
+        });
         boolean selected = selectedNotebookIds.contains(notebook.id);
         if (selected) cardBackground.setStroke(dp(3), 0xFFB5E2FF);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(176), 1);
@@ -1088,6 +1173,57 @@ public class MainActivity extends Activity {
                 showCreationDateResults(year, month, dayOfMonth),
                 today.get(Calendar.YEAR), today.get(Calendar.MONTH), today.get(Calendar.DAY_OF_MONTH));
         picker.show();
+    }
+
+    private void renderCalendarDestination() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        page.setPadding(dp(2), dp(14), dp(2), dp(14));
+        TextView intro = text("اختَر يومًا لعرض الدفاتر والمهام التي أُنشئت فيه.",
+                14, MUTED, false);
+        intro.setGravity(Gravity.CENTER);
+        intro.setPadding(dp(8), dp(2), dp(8), dp(12));
+        page.addView(intro, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout dateCard = new LinearLayout(this);
+        dateCard.setOrientation(LinearLayout.VERTICAL);
+        dateCard.setGravity(Gravity.CENTER_HORIZONTAL);
+        dateCard.setPadding(dp(10), dp(10), dp(10), dp(12));
+        dateCard.setBackground(roundedStroke(Color.rgb(12, 20, 32), 0x8848A8FF, dp(18)));
+        Calendar today = Calendar.getInstance(TimeZone.getDefault(), Locale.getDefault());
+        int[] selectedDate = {
+                today.get(Calendar.YEAR), today.get(Calendar.MONTH), today.get(Calendar.DAY_OF_MONTH)
+        };
+        TextView selectedLabel = text("التاريخ المحدد: " + formatLocalDate(today.getTimeInMillis()),
+                15, Color.WHITE, true);
+        selectedLabel.setGravity(Gravity.CENTER);
+        selectedLabel.setPadding(0, 0, 0, dp(6));
+        dateCard.addView(selectedLabel, new LinearLayout.LayoutParams(-1, -2));
+
+        DatePicker datePicker = new DatePicker(this);
+        datePicker.init(selectedDate[0], selectedDate[1], selectedDate[2], (picker, year, month, day) -> {
+            selectedDate[0] = year;
+            selectedDate[1] = month;
+            selectedDate[2] = day;
+            Calendar localDate = Calendar.getInstance(TimeZone.getDefault(), Locale.getDefault());
+            localDate.clear();
+            localDate.set(year, month, day, 12, 0, 0);
+            selectedLabel.setText("التاريخ المحدد: " + formatLocalDate(localDate.getTimeInMillis()));
+        });
+        dateCard.addView(datePicker, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView showDate = actionButton("عرض الدفاتر والمهام لهذا اليوم", true);
+        LinearLayout.LayoutParams showDateParams = new LinearLayout.LayoutParams(-1, dp(48));
+        showDateParams.topMargin = dp(8);
+        dateCard.addView(showDate, showDateParams);
+        showDate.setOnClickListener(v -> showCreationDateResults(
+                selectedDate[0], selectedDate[1], selectedDate[2]));
+        page.addView(dateCard, new LinearLayout.LayoutParams(-1, -2));
+        scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
+        contentHost.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     }
 
     private void showCreationDateResults(int year, int month, int dayOfMonth) {
@@ -1203,6 +1339,102 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.bottomMargin = dp(7);
         results.addView(entry, params);
+    }
+
+    private void renderTrashDestination() {
+        boolean trashLoaded;
+        synchronized (TrashCleanupWorker.DATA_LOCK) {
+            trashLoaded = loadTrashFromPreferences();
+            if (trashLoaded) {
+                if (purgeExpiredTrash()) saveNotebooks();
+                else scheduleTrashCleanup();
+            }
+        }
+        if (!trashLoaded) {
+            TextView error = text("تعذر قراءة سلة المحذوفات. لم تُحذف محتوياتها، وأُوقفت التعديلات لحماية بياناتك.",
+                    15, MUTED, false);
+            error.setGravity(Gravity.CENTER);
+            error.setPadding(dp(20), dp(30), dp(20), dp(30));
+            contentHost.addView(error, new LinearLayout.LayoutParams(-1, -1));
+            return;
+        }
+
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        page.setPadding(0, dp(10), 0, dp(8));
+        TextView hint = text("تُحذف الدفاتر نهائيًا بعد ٣٠ يومًا من نقلها إلى السلة.", 13, MUTED, false);
+        hint.setPadding(dp(4), 0, dp(4), dp(10));
+        page.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(2), dp(2), dp(2), dp(8));
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        if (trashedNotebooks.isEmpty()) {
+            TextView empty = text("السلة فارغة", 16, MUTED, false);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty, new LinearLayout.LayoutParams(-1, dp(180)));
+        } else {
+            for (TrashedNotebook entry : new ArrayList<>(trashedNotebooks)) {
+                LinearLayout item = new LinearLayout(this);
+                item.setOrientation(LinearLayout.VERTICAL);
+                item.setPadding(dp(13), dp(12), dp(13), dp(12));
+                item.setBackground(roundedStroke(Color.rgb(18, 27, 40), 0x77547BA5, dp(15)));
+                LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, -2);
+                itemParams.bottomMargin = dp(9);
+                list.addView(item, itemParams);
+                TextView name = text(entry.notebook.name, 17, Color.WHITE, true);
+                item.addView(name, new LinearLayout.LayoutParams(-1, -2));
+                TextView dates = text("نُقل إلى السلة: " + formatLocalDate(entry.deletedAtMs)
+                                + "\nيُحذف نهائيًا: "
+                                + formatLocalDate(TrashCleanupWorker.expiryTime(entry.deletedAtMs)),
+                        12, MUTED, false);
+                dates.setPadding(0, dp(5), 0, dp(10));
+                item.addView(dates, new LinearLayout.LayoutParams(-1, -2));
+
+                LinearLayout actions = new LinearLayout(this);
+                actions.setGravity(Gravity.CENTER_VERTICAL);
+                actions.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                TextView restore = actionButton("استعادة", true);
+                TextView deleteForever = actionButton("حذف نهائي", false);
+                LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+                actionParams.setMargins(dp(3), 0, dp(3), 0);
+                actions.addView(restore, actionParams);
+                actions.addView(deleteForever, new LinearLayout.LayoutParams(0, dp(42), 1));
+                item.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+
+                restore.setEnabled(storageHealthy);
+                deleteForever.setEnabled(storageHealthy);
+                restore.setOnClickListener(v -> {
+                    if (System.currentTimeMillis() >= TrashCleanupWorker.expiryTime(entry.deletedAtMs)) {
+                        trashedNotebooks.remove(entry);
+                        saveNotebooks();
+                        renderDestinationContent();
+                        Toast.makeText(this, "انتهت مدة الاحتفاظ بهذا الدفتر", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    trashedNotebooks.remove(entry);
+                    notebooks.add(entry.notebook);
+                    saveNotebooks();
+                    renderDestinationContent();
+                });
+                deleteForever.setOnClickListener(v -> new AlertDialog.Builder(this)
+                        .setTitle("حذف نهائي")
+                        .setMessage("سيُحذف الدفتر وملفاته نهائيًا ولا يمكن استعادته.")
+                        .setNegativeButton("إلغاء", null)
+                        .setPositiveButton("حذف نهائيًا", (dialog, which) -> {
+                            trashedNotebooks.remove(entry);
+                            saveNotebooks();
+                            cleanupUnusedTaskImages();
+                            renderDestinationContent();
+                        }).show());
+            }
+        }
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        contentHost.addView(page, new LinearLayout.LayoutParams(-1, -1));
     }
 
     private void showDetails(Notebook notebook) {
@@ -1323,6 +1555,17 @@ public class MainActivity extends Activity {
         final boolean isNew = existing == null;
         Dialog dialog = new Dialog(this);
         LinearLayout panel = dialogPanel();
+        panel.setPadding(dp(16), dp(14), dp(16), dp(14));
+        ScrollView editorScroll = new ScrollView(this);
+        editorScroll.setFillViewport(false);
+        editorScroll.setClipToPadding(false);
+        LinearLayout editorContent = new LinearLayout(this);
+        editorContent.setOrientation(LinearLayout.VERTICAL);
+        editorContent.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        editorContent.setClipToPadding(false);
+        editorScroll.addView(editorContent, new ScrollView.LayoutParams(-1, -2));
+        panel.addView(editorScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
@@ -1333,16 +1576,16 @@ public class MainActivity extends Activity {
         TextView headingText = text(isNew ? "دفتر جديد" : "تعديل الدفتر", 22, Color.WHITE, true);
         heading.addView(headingText);
         heading.setPadding(0, 0, 0, dp(14));
-        panel.addView(heading);
+        editorContent.addView(heading);
 
         EditText nameInput = editField("اسم الدفتر");
         if (!isNew) nameInput.setText(existing.name);
-        panel.addView(nameInput, new LinearLayout.LayoutParams(-1, dp(52)));
+        editorContent.addView(nameInput, new LinearLayout.LayoutParams(-1, dp(52)));
 
         TitleImageState titleImageState = new TitleImageState(isNew ? null : existing.titleImageFileName);
         TextView titleImageLabel = text("صورة العنوان (اختياري)", 12, MUTED, false);
         titleImageLabel.setPadding(0, dp(8), 0, dp(3));
-        panel.addView(titleImageLabel);
+        editorContent.addView(titleImageLabel);
         LinearLayout titleImageControls = new LinearLayout(this);
         titleImageControls.setGravity(Gravity.CENTER_VERTICAL);
         titleImageControls.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
@@ -1359,20 +1602,17 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams titleMenuParams = new LinearLayout.LayoutParams(dp(42), dp(42));
         titleMenuParams.setMargins(dp(8), 0, 0, 0);
         titleImageControls.addView(titleImageMenu, titleMenuParams);
-        panel.addView(titleImageControls, new LinearLayout.LayoutParams(-1, dp(56)));
+        editorContent.addView(titleImageControls, new LinearLayout.LayoutParams(-1, dp(56)));
         refreshTitleImagePreview(titleImageState);
         titleImageMenu.setOnClickListener(v -> showTitleImageMenu(titleImageMenu, titleImageState));
 
-        TextView tasksLabel = text("المهام — ↔ لتبديل مهمتين، و«＋ إضافة هنا» لإدراج حقل", 14, MUTED, true);
+        TextView tasksLabel = text("المهام — أدوات كل مهمة أسفل حقل الكتابة", 14, MUTED, true);
         tasksLabel.setPadding(0, dp(15), 0, dp(7));
-        panel.addView(tasksLabel);
+        editorContent.addView(tasksLabel);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        ScrollView rowsScroll = new ScrollView(this);
-        rowsScroll.setFillViewport(false);
-        rowsScroll.addView(rows);
-        panel.addView(rowsScroll, new LinearLayout.LayoutParams(-1, dp(220)));
+        editorContent.addView(rows, new LinearLayout.LayoutParams(-1, -2));
 
         SwapSelection swapSelection = new SwapSelection();
         if (!isNew && !existing.tasks.isEmpty()) {
@@ -1385,9 +1625,11 @@ public class MainActivity extends Activity {
         TextView addTask = actionButton("＋  إضافة مهمة", false);
         LinearLayout.LayoutParams addTaskParams = new LinearLayout.LayoutParams(-1, dp(46));
         addTaskParams.topMargin = dp(4);
-        panel.addView(addTask, addTaskParams);
-        addTask.setOnClickListener(v -> addTaskRowAt(rows, swapSelection,
-                new TaskEntry("", null), rows.getChildCount()));
+        editorContent.addView(addTask, addTaskParams);
+        addTask.setOnClickListener(v -> {
+            addTaskRowAt(rows, swapSelection, new TaskEntry("", null), rows.getChildCount());
+            editorScroll.post(() -> editorScroll.smoothScrollTo(0, editorContent.getBottom()));
+        });
 
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER_VERTICAL);
@@ -1443,49 +1685,54 @@ public class MainActivity extends Activity {
         configureDialog(dialog);
         dialog.setOnDismissListener(ignored -> cleanupUnusedTaskImages());
         dialog.show();
-        sizeDialog(dialog);
+        sizeEditorDialog(dialog);
     }
 
     private void addTaskRowAt(LinearLayout rows, SwapSelection selection, TaskEntry initial, int requestedIndex) {
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.VERTICAL);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        item.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        item.setPadding(dp(12), dp(10), dp(12), dp(8));
+        item.setBackground(roundedStroke(Color.rgb(14, 23, 36), 0x774A8BC5, dp(15)));
         TaskEntry taskEntry = initial == null ? new TaskEntry("", null)
                 : new TaskEntry(initial.text, null, initial.createdAtMs);
         if (initial != null) taskEntry.imageFileNames.addAll(initial.imageFileNames);
-        EditText taskInput = editTaskField("اكتب المهمة");
+
+        LinearLayout fieldCard = new LinearLayout(this);
+        fieldCard.setOrientation(LinearLayout.VERTICAL);
+        TextView taskLabel = text("عنوان/تفاصيل المهمة", 13, Color.rgb(145, 204, 255), true);
+        taskLabel.setPadding(dp(2), 0, dp(2), dp(5));
+        fieldCard.addView(taskLabel, new LinearLayout.LayoutParams(-1, -2));
+        EditText taskInput = editTaskField("اكتب عنوان المهمة أو تفاصيلها هنا");
         taskInput.setText(taskEntry.text);
-        row.addView(taskInput, new LinearLayout.LayoutParams(0, -2, 1));
+        fieldCard.setTag(taskInput);
+        fieldCard.addView(taskInput, new LinearLayout.LayoutParams(-1, -2));
+        item.addView(fieldCard, new LinearLayout.LayoutParams(-1, -2));
+        item.setTag(taskEntry);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        controls.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        buttonParams.setMargins(dp(3), dp(8), dp(3), dp(2));
         TextView swapHandle = swapHandle();
-        row.addView(swapHandle, new LinearLayout.LayoutParams(dp(42), dp(46)));
-        TextView remove = text("−", 24, Color.rgb(205, 216, 230), true);
-        remove.setGravity(Gravity.CENTER);
-        remove.setBackground(roundedSolid(Color.rgb(34, 47, 65), dp(13)));
-        LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(dp(46), dp(46));
-        removeParams.setMargins(dp(8), 0, 0, 0);
-        row.addView(remove, removeParams);
-        row.setTag(taskInput);
-        item.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        swapHandle.setText("↔ تبديل");
+        swapHandle.setTextSize(12);
+        controls.addView(swapHandle, buttonParams);
+        TextView imageMenu = actionButton("صور  ⋮", false);
+        imageMenu.setTextSize(12);
+        imageMenu.setContentDescription("إدارة صور المهمة");
+        controls.addView(imageMenu, new LinearLayout.LayoutParams(0, dp(42), 1));
+        TextView remove = actionButton("حذف", false);
+        remove.setTextSize(12);
+        controls.addView(remove, new LinearLayout.LayoutParams(0, dp(42), 1));
+        item.addView(controls, new LinearLayout.LayoutParams(-1, -2));
+
         TextView taskDate = text("أُنشئت المهمة: " + formatLocalDate(taskEntry.createdAtMs),
                 11, MUTED, false);
         taskDate.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        taskDate.setPadding(0, dp(3), 0, dp(4));
+        taskDate.setPadding(dp(2), dp(3), dp(2), dp(5));
         item.addView(taskDate, new LinearLayout.LayoutParams(-1, -2));
-        item.setTag(taskEntry);
-
-        LinearLayout imageMenuRow = new LinearLayout(this);
-        imageMenuRow.setGravity(Gravity.CENTER_VERTICAL);
-        imageMenuRow.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        TextView imageMenu = text("⋮", 22, Color.rgb(93, 184, 255), true);
-        imageMenu.setGravity(Gravity.CENTER);
-        imageMenu.setContentDescription("إدارة صور المهمة");
-        imageMenu.setBackground(rippleBackground(0x223E78B8, dp(10)));
-        applyElectricGlow(imageMenu, 1, true);
-        imageMenuRow.addView(imageMenu, new LinearLayout.LayoutParams(dp(36), dp(32)));
-        item.addView(imageMenuRow, new LinearLayout.LayoutParams(-1, dp(34)));
 
         HorizontalScrollView imageScroll = new HorizontalScrollView(this);
         imageScroll.setHorizontalScrollBarEnabled(false);
@@ -1653,7 +1900,7 @@ public class MainActivity extends Activity {
         int count = rows.getChildCount();
         for (int i = 0; i < count; i++) {
             LinearLayout item = (LinearLayout) rows.getChildAt(i);
-            View insertHere = item.getChildAt(3);
+            View insertHere = item.getChildAt(item.getChildCount() - 1);
             insertHere.setVisibility(i < count - 1 ? View.VISIBLE : View.GONE);
         }
     }
@@ -1745,7 +1992,7 @@ public class MainActivity extends Activity {
         if (!storageHealthy) return;
         new AlertDialog.Builder(this)
                 .setTitle("نقل الدفتر إلى سلة المحذوفات")
-                .setMessage("سيبقى «" + notebook.name + "» في السلة لمدة شهر، ويمكنك استعادته خلالها.")
+                .setMessage("سيبقى «" + notebook.name + "» في السلة لمدة ٣٠ يومًا، ويمكنك استعادته خلالها.")
                 .setNegativeButton("إلغاء", null)
                 .setPositiveButton("نقل إلى السلة", (dialog, which) -> {
                     notebooks.remove(notebook);
@@ -1781,7 +2028,7 @@ public class MainActivity extends Activity {
         TextView title = text("سلة المحذوفات", 21, Color.WHITE, true);
         title.setPadding(0, 0, 0, dp(8));
         panel.addView(title);
-        TextView hint = text("تُحذف العناصر تلقائيًا بعد شهر من نقلها إلى السلة.", 12, MUTED, false);
+        TextView hint = text("تُحذف العناصر تلقائيًا بعد ٣٠ يومًا من نقلها إلى السلة.", 12, MUTED, false);
         hint.setPadding(0, 0, 0, dp(10));
         panel.addView(hint);
         ScrollView scroll = new ScrollView(this);
@@ -2351,11 +2598,15 @@ public class MainActivity extends Activity {
 
     private EditText editTaskField(String hint) {
         EditText input = editField(hint);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setSingleLine(false);
         input.setHorizontallyScrolling(false);
-        input.setMinLines(1);
-        input.setMinHeight(dp(49));
+        input.setMinLines(4);
+        input.setMaxLines(10);
+        input.setMinHeight(dp(116));
+        input.setVerticalScrollBarEnabled(true);
+        input.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         input.setGravity(Gravity.TOP | Gravity.END);
         input.setPadding(dp(14), dp(10), dp(14), dp(10));
         return input;
@@ -2492,8 +2743,21 @@ public class MainActivity extends Activity {
                 WindowManager.LayoutParams attrs = window.getAttributes();
                 attrs.dimAmount = 0.68f;
                 window.setAttributes(attrs);
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             }
         });
+    }
+
+    private void sizeEditorDialog(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            int availableHeight = Math.max(dp(300), screenHeight - dp(96));
+            int editorHeight = Math.min(dp(760), availableHeight);
+            window.setLayout(getResources().getDisplayMetrics().widthPixels - dp(32), editorHeight);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
     }
 
     private void sizeDialog(Dialog dialog) {

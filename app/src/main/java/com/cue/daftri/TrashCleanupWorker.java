@@ -15,7 +15,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.util.Calendar;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 public final class TrashCleanupWorker extends Worker {
     public static final String UNIQUE_WORK_NAME = "daftri_trash_cleanup";
     public static final Object DATA_LOCK = new Object();
+    static final int RETENTION_DAYS = 30;
     private static final String PREFS_NAME = "daftri";
 
     public TrashCleanupWorker(@NonNull Context context, @NonNull WorkerParameters params) {
@@ -31,10 +31,7 @@ public final class TrashCleanupWorker extends Worker {
     }
 
     public static long expiryTime(long deletedAtMillis) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTimeInMillis(deletedAtMillis);
-        calendar.add(Calendar.MONTH, 1);
-        return calendar.getTimeInMillis();
+        return deletedAtMillis + TimeUnit.DAYS.toMillis(RETENTION_DAYS);
     }
 
     public static void schedule(Context context, long earliestExpiryMillis) {
