@@ -2,6 +2,7 @@ package com.cue.daftri;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.app.Dialog;
 import android.animation.ValueAnimator;
 import android.content.ClipData;
@@ -353,6 +354,13 @@ public class MainActivity extends Activity {
         titleBlock.addView(title);
         titleBlock.addView(subtitle);
         heading.addView(titleBlock, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView calendarButton = actionButton("تقويم", false);
+        calendarButton.setTextSize(12);
+        calendarButton.setContentDescription("اختيار يوم لعرض الدفاتر والمهام المُنشأة فيه");
+        LinearLayout.LayoutParams calendarParams = new LinearLayout.LayoutParams(dp(62), dp(44));
+        calendarParams.setMargins(dp(2), 0, dp(2), 0);
+        heading.addView(calendarButton, calendarParams);
+        calendarButton.setOnClickListener(v -> showCreationDatePicker());
         privacyOptionsButton = text("⋮", 25, MUTED, true);
         privacyOptionsButton.setGravity(Gravity.CENTER);
         privacyOptionsButton.setContentDescription("خيارات الخصوصية");
@@ -1072,6 +1080,129 @@ public class MainActivity extends Activity {
             return true;
         });
         menu.show();
+    }
+
+    private void showCreationDatePicker() {
+        Calendar today = Calendar.getInstance(TimeZone.getDefault(), Locale.getDefault());
+        DatePickerDialog picker = new DatePickerDialog(this, (view, year, month, dayOfMonth) ->
+                showCreationDateResults(year, month, dayOfMonth),
+                today.get(Calendar.YEAR), today.get(Calendar.MONTH), today.get(Calendar.DAY_OF_MONTH));
+        picker.show();
+    }
+
+    private void showCreationDateResults(int year, int month, int dayOfMonth) {
+        TimeZone localTimeZone = TimeZone.getDefault();
+        Calendar selectedDate = Calendar.getInstance(localTimeZone, Locale.getDefault());
+        selectedDate.clear();
+        selectedDate.set(year, month, dayOfMonth, 12, 0, 0);
+        String localDateLabel = formatLocalDate(selectedDate.getTimeInMillis());
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = dialogPanel();
+        TextView heading = text("إنشاءات يوم " + localDateLabel, 19, Color.WHITE, true);
+        heading.setPadding(0, 0, 0, dp(6));
+        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        TextView hint = text("تُعرض البطاقات والمهام بحسب تاريخ إنشائها المحلي.", 12, MUTED, false);
+        hint.setPadding(0, 0, 0, dp(8));
+        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        results.setPadding(0, dp(2), 0, dp(4));
+        scroll.addView(results, new ScrollView.LayoutParams(-1, -2));
+
+        addCreationResultsSection(results, "بطاقات الدفاتر المُنشأة في هذا اليوم");
+        int notebookCount = 0;
+        for (Notebook notebook : notebooks) {
+            if (!LocalCreationDateQuery.matches(notebook.createdAtMs, year, month, dayOfMonth, localTimeZone)) {
+                continue;
+            }
+            notebookCount++;
+            LinearLayout entry = new LinearLayout(this);
+            entry.setOrientation(LinearLayout.VERTICAL);
+            entry.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            entry.setPadding(dp(13), dp(10), dp(13), dp(10));
+            entry.setBackground(roundedStroke(Color.rgb(24, 43, 65), 0xAA48A8FF, dp(12)));
+            TextView name = text(notebook.name, 16, Color.WHITE, true);
+            entry.addView(name, new LinearLayout.LayoutParams(-1, -2));
+            TextView created = text("بطاقة دفتر · " + formatLocalDate(notebook.createdAtMs), 11, MUTED, false);
+            created.setPadding(0, dp(3), 0, 0);
+            entry.addView(created, new LinearLayout.LayoutParams(-1, -2));
+            addCreationResultSpacing(results, entry);
+        }
+        if (notebookCount == 0) addCreationResultsEmpty(results, "لا توجد بطاقات دفاتر أُنشئت في هذا اليوم");
+
+        addCreationResultsSection(results, "المهام المُنشأة في هذا اليوم");
+        int taskCount = 0;
+        for (Notebook notebook : notebooks) {
+            ArrayList<TaskEntry> matchingTasks = new ArrayList<>();
+            for (TaskEntry task : notebook.tasks) {
+                if (LocalCreationDateQuery.matches(task.createdAtMs, year, month, dayOfMonth, localTimeZone)) {
+                    matchingTasks.add(task);
+                }
+            }
+            if (matchingTasks.isEmpty()) continue;
+            taskCount += matchingTasks.size();
+            LinearLayout group = new LinearLayout(this);
+            group.setOrientation(LinearLayout.VERTICAL);
+            group.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            group.setPadding(dp(12), dp(9), dp(12), dp(5));
+            group.setBackground(roundedStroke(Color.rgb(15, 26, 39), 0x7748A8FF, dp(12)));
+            TextView groupTitle = text("داخل الدفتر: " + notebook.name, 14,
+                    Color.rgb(135, 202, 255), true);
+            groupTitle.setPadding(0, 0, 0, dp(6));
+            group.addView(groupTitle, new LinearLayout.LayoutParams(-1, -2));
+            for (TaskEntry task : matchingTasks) {
+                LinearLayout taskEntry = new LinearLayout(this);
+                taskEntry.setOrientation(LinearLayout.VERTICAL);
+                taskEntry.setPadding(dp(10), dp(8), dp(10), dp(8));
+                taskEntry.setBackground(roundedSolid(Color.rgb(25, 35, 52), dp(9)));
+                TextView taskText = text("•  " + task.text, 15, Color.rgb(235, 242, 252), false);
+                taskText.setGravity(Gravity.TOP | Gravity.END);
+                taskText.setSingleLine(false);
+                taskText.setMaxLines(Integer.MAX_VALUE);
+                taskEntry.addView(taskText, new LinearLayout.LayoutParams(-1, -2));
+                TextView taskDate = text("مهمة · " + formatLocalDate(task.createdAtMs), 11, MUTED, false);
+                taskDate.setPadding(0, dp(3), 0, 0);
+                taskEntry.addView(taskDate, new LinearLayout.LayoutParams(-1, -2));
+                LinearLayout.LayoutParams taskParams = new LinearLayout.LayoutParams(-1, -2);
+                taskParams.bottomMargin = dp(6);
+                group.addView(taskEntry, taskParams);
+            }
+            addCreationResultSpacing(results, group);
+        }
+        if (taskCount == 0) addCreationResultsEmpty(results, "لا توجد مهام أُنشئت في هذا اليوم");
+
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, dp(370)));
+        TextView close = actionButton("إغلاق", true);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(46));
+        closeParams.topMargin = dp(10);
+        panel.addView(close, closeParams);
+        close.setOnClickListener(v -> dialog.dismiss());
+        dialog.setContentView(panel);
+        configureDialog(dialog);
+        dialog.show();
+        sizeDialog(dialog);
+    }
+
+    private void addCreationResultsSection(LinearLayout results, String title) {
+        TextView section = text(title, 14, Color.rgb(135, 202, 255), true);
+        section.setPadding(dp(2), dp(10), dp(2), dp(7));
+        results.addView(section, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void addCreationResultsEmpty(LinearLayout results, String message) {
+        TextView empty = text(message, 13, MUTED, false);
+        empty.setPadding(dp(8), dp(3), dp(8), dp(7));
+        results.addView(empty, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void addCreationResultSpacing(LinearLayout results, View entry) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.bottomMargin = dp(7);
+        results.addView(entry, params);
     }
 
     private void showDetails(Notebook notebook) {
