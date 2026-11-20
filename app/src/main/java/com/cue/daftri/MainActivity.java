@@ -86,7 +86,6 @@ import com.google.android.ump.UserMessagingPlatform;
 public class MainActivity extends Activity {
     private static final int REQUEST_TASK_IMAGES = 410;
     private static final int REQUEST_TITLE_IMAGE = 411;
-    private static final int REQUEST_CREATE_PDF = 412;
     private static final int TASK_IMAGE_LIMIT = 10;
     private static final int INTERSTITIAL_EVERY_DETAILS_CLOSES = 3;
     private static final int MAX_AD_RETRIES = 2;
@@ -130,7 +129,6 @@ public class MainActivity extends Activity {
     private boolean selectingNotebooks;
     private boolean pdfExporting;
     private boolean storageHealthy = true;
-    private File pendingPdfFile;
     private Dialog detailsDialog;
     private TaskEntry pendingImageTask;
     private LinearLayout pendingTaskImageStrip;
@@ -206,7 +204,12 @@ public class MainActivity extends Activity {
 
     private void scheduleNativeRetry() {
         if (!canRequestAds() || isFinishing() || isDestroyed() || nativeAdCard == null || cardsContainer == null
-                || nativeAdCard.getParent() != cardsContainer || nativeRetryCount >= MAX_AD_RETRIES) return;
+                || nativeAdCard.getParent() != cardsContainer) return;
+        if (nativeRetryCount >= MAX_AD_RETRIES) {
+            nativeAdAttempted = true;
+            Log.i(ADS_TAG, "Native retry limit reached; further requests paused until the next consent cycle");
+            return;
+        }
         cancelNativeRetry();
         long delayMs = 60_000L * (nativeRetryCount + 1);
         nativeRetryCount++;
@@ -276,10 +279,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CREATE_PDF) {
-            finishPdfSave(resultCode, data);
-            return;
-        }
         if (requestCode == REQUEST_TASK_IMAGES) {
             if (resultCode == RESULT_OK && data != null && pendingImageTask != null) {
                 try {
@@ -2407,17 +2406,22 @@ public class MainActivity extends Activity {
                     }
                     return;
                 }
-                pendingPdfFile = outputFile;
-                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("application/pdf");
-                intent.putExtra(Intent.EXTRA_TITLE, "Daftri_" + System.currentTimeMillis() + ".pdf");
+                Uri contentUri = androidx.core.content.FileProvider.getUriForFile(
+                        this, getPackageName() + ".fileprovider", outputFile);
+                Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                sendIntent.setType("application/pdf");
+                sendIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                sendIntent.putExtra(Intent.EXTRA_TITLE, outputFile.getName());
+                sendIntent.setClipData(ClipData.newUri(
+                        getContentResolver(), outputFile.getName(), contentUri));
+                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser = Intent.createChooser(sendIntent, "مشاركة ملف PDF");
+                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 try {
-                    startActivityForResult(intent, REQUEST_CREATE_PDF);
+                    startActivity(chooser);
                 } catch (Exception error) {
-                    pendingPdfFile = null;
                     outputFile.delete();
-                    Toast.makeText(this, "لا يتوفر تطبيق لحفظ ملف PDF", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "لا يتوفر تطبيق لمشاركة PDF", Toast.LENGTH_SHORT).show();
                 }
             });
         }, "daftri-pdf-export").start();
@@ -2511,29 +2515,6 @@ public class MainActivity extends Activity {
             page.y += height + 12;
         } finally {
             bitmap.recycle();
-        }
-    }
-
-    private void finishPdfSave(int resultCode, Intent data) {
-        File source = pendingPdfFile;
-        pendingPdfFile = null;
-        if (source == null) return;
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            source.delete();
-            return;
-        }
-        try (InputStream input = new java.io.FileInputStream(source);
-             OutputStream output = getContentResolver().openOutputStream(data.getData(), "w")) {
-            if (output == null) throw new IOException("PDF destination could not be opened");
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-            output.flush();
-            Toast.makeText(this, "تم حفظ ملف PDF", Toast.LENGTH_SHORT).show();
-        } catch (Exception error) {
-            Toast.makeText(this, "تعذر حفظ ملف PDF", Toast.LENGTH_SHORT).show();
-        } finally {
-            source.delete();
         }
     }
 
