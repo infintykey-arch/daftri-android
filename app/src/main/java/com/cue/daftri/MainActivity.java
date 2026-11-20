@@ -88,7 +88,8 @@ public class MainActivity extends Activity {
     private static final int REQUEST_TITLE_IMAGE = 411;
     private static final int TASK_IMAGE_LIMIT = 10;
     private static final int INTERSTITIAL_EVERY_DETAILS_CLOSES = 3;
-    private static final int MAX_AD_RETRIES = 2;
+    private static final int MAX_BANNER_AD_RETRIES = 2;
+    private static final long BANNER_RETRY_DELAY_MS = 30_000L;
     private static final long MIN_BANNER_REQUEST_INTERVAL_MS = 30_000L;
     private static final String ADMOB_PREFS = "daftri_admob";
     private static final String PREF_LAST_BANNER_REQUEST_MS = "last_banner_request_ms";
@@ -151,7 +152,7 @@ public class MainActivity extends Activity {
     private boolean interstitialShowing;
     private final Handler adRetryHandler = new Handler(Looper.getMainLooper());
     private int bannerRetryCount;
-    private int nativeRetryCount;
+    private final NativeAdRetryPolicy nativeAdRetryPolicy = new NativeAdRetryPolicy();
     private Runnable bannerRetryRunnable;
     private Runnable nativeRetryRunnable;
 
@@ -171,7 +172,7 @@ public class MainActivity extends Activity {
 
     private void scheduleBannerRequest(long requestedDelayMs, boolean countsAsFailureRetry) {
         if (!canRequestAds() || isFinishing() || isDestroyed() || bannerAdView != null) return;
-        if (countsAsFailureRetry && bannerRetryCount >= MAX_AD_RETRIES) {
+        if (countsAsFailureRetry && bannerRetryCount >= MAX_BANNER_AD_RETRIES) {
             Log.i(ADS_TAG, "Banner retry limit reached");
             return;
         }
@@ -189,7 +190,7 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleBannerRetry() {
-        scheduleBannerRequest(60_000L * (bannerRetryCount + 1), true);
+        scheduleBannerRequest(BANNER_RETRY_DELAY_MS, true);
     }
 
     private void scheduleBannerReplacement() {
@@ -205,15 +206,15 @@ public class MainActivity extends Activity {
     private void scheduleNativeRetry() {
         if (!canRequestAds() || isFinishing() || isDestroyed() || nativeAdCard == null || cardsContainer == null
                 || nativeAdCard.getParent() != cardsContainer) return;
-        if (nativeRetryCount >= MAX_AD_RETRIES) {
+        if (nativeRetryRunnable != null) return;
+        if (!nativeAdRetryPolicy.tryScheduleRetry()) {
             nativeAdAttempted = true;
-            Log.i(ADS_TAG, "Native retry limit reached; further requests paused until the next consent cycle");
+            Log.i(ADS_TAG, "Native retry limit reached; requests paused until the ad slot starts a new cycle");
             return;
         }
-        cancelNativeRetry();
-        long delayMs = 60_000L * (nativeRetryCount + 1);
-        nativeRetryCount++;
-        Log.i(ADS_TAG, "Scheduling native retry " + nativeRetryCount + " in " + delayMs + "ms");
+        long delayMs = NativeAdRetryPolicy.RETRY_DELAY_MS;
+        Log.i(ADS_TAG, "Scheduling native retry " + nativeAdRetryPolicy.getRetriesScheduled()
+                + " in " + delayMs + "ms");
         nativeRetryRunnable = () -> {
             nativeRetryRunnable = null;
             if (adsInitialized && canRequestAds() && !isFinishing() && !isDestroyed()) loadNativeAdIfNeeded();
@@ -553,8 +554,6 @@ public class MainActivity extends Activity {
         updateSelectionToolbar();
         cardsContainer.removeAllViews();
         if (notebooks.isEmpty()) {
-            destroyActiveNativeAd(false);
-            nativeAdAttempted = false;
             TextView empty = text("ابدأ بدفترك الأول\nاضغط + لإضافة دفتر ومهامه", 16, MUTED, false);
             empty.setGravity(Gravity.CENTER);
             empty.setLineSpacing(dp(7), 1f);
@@ -656,7 +655,7 @@ public class MainActivity extends Activity {
             cancelBannerRetry();
             cancelNativeRetry();
             bannerRetryCount = 0;
-            nativeRetryCount = 0;
+            nativeAdRetryPolicy.reset();
             destroyBannerAd(true);
             destroyActiveNativeAd(true);
             nativeAdAttempted = false;
@@ -856,7 +855,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     cancelNativeRetry();
-                    nativeRetryCount = 0;
+                    nativeAdRetryPolicy.reset();
                     Log.i(ADS_TAG, "Native ad loaded; responseInfo=" + ad.getResponseInfo());
                     nativeAdCard.removeAllViews();
                     nativeAdPlaceholder = null;
@@ -984,6 +983,7 @@ public class MainActivity extends Activity {
             activeNativeAd.destroy();
             activeNativeAd = null;
             nativeAdAttempted = false;
+            nativeAdRetryPolicy.reset();
             cancelNativeRetry();
         }
         if (nativeAdCard != null) {
