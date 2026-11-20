@@ -1892,7 +1892,7 @@ public class MainActivity extends Activity {
                 if (savedTask instanceof JSONObject) {
                     JSONObject taskObject = (JSONObject) savedTask;
                     TaskEntry task = new TaskEntry(taskObject.optString("text", ""), null,
-                            taskObject.optLong("createdAt", System.currentTimeMillis()));
+                            CreationTimestampMigration.readCreatedAt(taskObject, "createdAt"));
                     JSONArray savedImages = taskObject.optJSONArray("images");
                     if (savedImages != null) {
                         for (int imageIndex = 0; imageIndex < savedImages.length(); imageIndex++) {
@@ -1905,13 +1905,15 @@ public class MainActivity extends Activity {
                     }
                     tasks.add(task);
                 } else {
-                    tasks.add(new TaskEntry(taskArray.optString(j, ""), null));
+                    tasks.add(new TaskEntry(taskArray.optString(j, ""), null,
+                            CreationTimestampMigration.readCreatedAt(savedTask, "createdAt")));
                 }
             }
         }
         return new Notebook(object.optString("id", UUID.randomUUID().toString()),
                 object.optString("name", "دفتر"), tasks, object.optInt("color", CARD_COLORS[0]),
-                object.optString("titleImage", null), object.optLong("createdAt", System.currentTimeMillis()));
+                object.optString("titleImage", null),
+                CreationTimestampMigration.readCreatedAt(object, "createdAt"));
     }
 
     private JSONObject notebookToJson(Notebook notebook) throws Exception {
@@ -1919,13 +1921,13 @@ public class MainActivity extends Activity {
         object.put("id", notebook.id);
         object.put("name", notebook.name);
         object.put("color", notebook.color);
-        object.put("createdAt", notebook.createdAtMs);
+        object.put("createdAt", notebook.createdAtMs == null ? JSONObject.NULL : notebook.createdAtMs);
         if (notebook.titleImageFileName != null) object.put("titleImage", notebook.titleImageFileName);
         JSONArray tasks = new JSONArray();
         for (TaskEntry task : notebook.tasks) {
             JSONObject taskObject = new JSONObject();
             taskObject.put("text", task.text);
-            taskObject.put("createdAt", task.createdAtMs);
+            taskObject.put("createdAt", task.createdAtMs == null ? JSONObject.NULL : task.createdAtMs);
             JSONArray images = new JSONArray();
             for (String fileName : task.imageFileNames) images.put(fileName);
             taskObject.put("images", images);
@@ -1959,7 +1961,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String formatLocalDate(long millis) {
+    private String formatLocalDate(Long millis) {
+        if (millis == null || millis <= 0L) return getString(R.string.date_unavailable);
         Locale locale = Locale.getDefault();
         String pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEE d/M/y");
         SimpleDateFormat formatter = new SimpleDateFormat(pattern, locale);
@@ -2394,7 +2397,7 @@ public class MainActivity extends Activity {
 
     private static class TaskEntry {
         String text;
-        final long createdAtMs;
+        final Long createdAtMs;
         final ArrayList<String> imageFileNames = new ArrayList<>();
 
         TaskEntry(String text, String imageFileName) {
@@ -2402,8 +2405,12 @@ public class MainActivity extends Activity {
         }
 
         TaskEntry(String text, String imageFileName, long createdAtMs) {
+            this(text, imageFileName, Long.valueOf(createdAtMs));
+        }
+
+        TaskEntry(String text, String imageFileName, Long createdAtMs) {
             this.text = text == null ? "" : text;
-            this.createdAtMs = createdAtMs > 0L ? createdAtMs : System.currentTimeMillis();
+            this.createdAtMs = createdAtMs != null && createdAtMs > 0L ? createdAtMs : null;
             if (imageFileName != null && !imageFileName.isEmpty()) imageFileNames.add(imageFileName);
         }
     }
@@ -2412,7 +2419,7 @@ public class MainActivity extends Activity {
         final String id;
         String name;
         final ArrayList<TaskEntry> tasks;
-        final long createdAtMs;
+        final Long createdAtMs;
         int color;
         String titleImageFileName;
 
@@ -2422,12 +2429,17 @@ public class MainActivity extends Activity {
 
         Notebook(String id, String name, List<TaskEntry> tasks, int color, String titleImageFileName,
                  long createdAtMs) {
+            this(id, name, tasks, color, titleImageFileName, Long.valueOf(createdAtMs));
+        }
+
+        Notebook(String id, String name, List<TaskEntry> tasks, int color, String titleImageFileName,
+                 Long createdAtMs) {
             this.id = id;
             this.name = name;
             this.tasks = new ArrayList<>(tasks);
             this.color = color;
             this.titleImageFileName = titleImageFileName;
-            this.createdAtMs = createdAtMs > 0L ? createdAtMs : System.currentTimeMillis();
+            this.createdAtMs = createdAtMs != null && createdAtMs > 0L ? createdAtMs : null;
         }
     }
 

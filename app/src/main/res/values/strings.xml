@@ -4,4 +4,5 @@
     <string name="trash_count">سلة المحذوفات · %1$s</string>
     <string name="pdf_exporting">جارٍ إعداد PDF…</string>
     <string name="pdf_export">إنشاء PDF</string>
+    <string name="date_unavailable">غير متوفر</string>
 </resources>
